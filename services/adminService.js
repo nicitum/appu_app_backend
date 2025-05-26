@@ -123,31 +123,59 @@ exports.updateUserService = async (customer_id, data) => {
   }
 };
 
-exports.updateProductService = async (id, updatedProductData) => {
+exports.updateProductService = async (id, updateFields) => {
   try {
-    const isProductExists = await getProductById(id);
-
-    if (!isProductExists || !isProductExists.length) {
-      throw new Error("Product not found");
+    // Validate that we have an id
+    if (!id) {
+      return {
+        statusCode: 400,
+        response: {
+          status: "error",
+          message: "Product ID is required"
+        }
+      };
     }
 
-    const updatedProduct = await updateProduct(id, updatedProductData);
+    // Validate that we have fields to update
+    if (!updateFields || Object.keys(updateFields).length === 0) {
+      return {
+        statusCode: 400,
+        response: {
+          status: "error",
+          message: "No fields provided for update"
+        }
+      };
+    }
 
+    const updatedProduct = await updateProduct(id, updateFields);
+    
     if (!updatedProduct) {
-      throw new Error("Product not found or update failed");
+      return {
+        statusCode: 404,
+        response: {
+          status: "error",
+          message: "Product not found"
+        }
+      };
     }
 
     return {
-      statusCode: 201,
+      statusCode: 200,
       response: {
-        status: true,
-        message: "Updated Product",
-        data: updateProduct,
-      },
+        status: "success",
+        message: "Product updated successfully",
+        data: updatedProduct
+      }
     };
   } catch (error) {
     console.error("Error in productService updateProduct:", error);
-    throw error;
+    return {
+      statusCode: 500,
+      response: {
+        status: "error",
+        message: error.message || "Failed to update product"
+      }
+    };
   }
 };
 

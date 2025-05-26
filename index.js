@@ -9,9 +9,10 @@ const generalRouter = require('./routes/generalRoutes');
 const worldline = require('./routes/worldline');
 const adminAssignRoutes = require('./routes/adminassign');
 const action = require('./routes/action');
+const path = require('path');
 
 const app = express();
-
+app.use('/images/salesman', express.static(path.join(__dirname, 'uploads/salesman')));
 // Session middleware
 app.use(
   session({
@@ -63,6 +64,8 @@ app.use('/', generalRouter);
 app.use('/', adminAssignRoutes);
 app.use('/', action);
 app.use('/', worldline);
+
+
 
 app.get('/s', (req, res) => {
   res.send('Secured page.');

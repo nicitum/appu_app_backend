@@ -2,9 +2,17 @@ const { mongoose } = require("mongoose");
 const userService = require("../services/userService");
 
 const loginController = async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, selectedRole } = req.body;
+  
+  console.log("Login attempt:", { 
+    username, 
+    hasPassword: !!password, 
+    selectedRole,
+    body: req.body 
+  });
 
   if (!username || !password) {
+    console.log("Login failed: Missing username or password");
     return res.status(400).json({
       status: false,
       message: "Username and password are required.",
@@ -12,11 +20,28 @@ const loginController = async (req, res) => {
   }
   try {
     const loginResponse = await userService.loginUser(username, password);
+    console.log("Login response:", {
+      statusCode: loginResponse.statusCode,
+      hasToken: !!loginResponse.response?.token,
+      role: loginResponse.response?.role
+    });
 
     if (loginResponse.statusCode !== 200) {
+      console.log("Login failed:", loginResponse.response);
       return res.status(loginResponse.statusCode).json({
         status: loginResponse.response.status,
         message: loginResponse.response.message,
+      });
+    }
+
+    if (selectedRole && loginResponse.response.role !== selectedRole) {
+      console.log("Role mismatch:", {
+        expected: selectedRole,
+        actual: loginResponse.response.role
+      });
+      return res.status(403).json({
+        status: false,
+        message: `Access denied: You are not a ${selectedRole}`,
       });
     }
 
@@ -73,18 +98,17 @@ const userDetailsController = async (req, res) => {
 const changePasswordController = async (req, res) => {
   try {
     const customer_id = req.userID;
-    const { oldPassword, newPassword } = req.body;
+    const { newPassword } = req.body;
 
-    if (!oldPassword || !newPassword) {
+    if (!newPassword) {
       return res.status(400).json({
         status: false,
-        message: "Old password and new password are required.",
+        message: "New password is required.",
       });
     }
 
     const changePasswordResponse = await userService.changePasswordService(
       customer_id,
-      oldPassword,
       newPassword
     );
 

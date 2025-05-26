@@ -7,10 +7,11 @@ const moment = require("moment-timezone");
 const bcrypt = require('bcrypt');
 const path = require("path");
 const multer = require('multer');
+const adminService = require("../services/adminService");
 
 
-// Configure Multer for file storage
-const storage = multer.diskStorage({
+// Configure Multer for product images (LEAVE THIS UNTOUCHED)
+const productStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadPath = path.join(__dirname, '..', 'uploads', 'products');
     fs.mkdirSync(uploadPath, { recursive: true });
@@ -34,15 +35,36 @@ const fileFilter = (req, file, cb) => {
   cb(new Error('Only images are allowed (jpeg, jpg, png, gif)'));
 };
 
-// Initialize Multer
-const upload = multer({
-  storage,
+// Initialize Multer for product images (LEAVE THIS UNTOUCHED)
+const uploadProduct = multer({
+  storage: productStorage,
   fileFilter,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
 });
 
-// Upload product image endpoint
-router.post('/upload/product-image/:productId', upload.single('image'), async (req, res) => {
+// SEPARATE CONFIGURATION FOR SALESMAN IMAGES
+const salesmanStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadPath = path.join(__dirname, '..', 'uploads', 'salesman');
+    fs.mkdirSync(uploadPath, { recursive: true });
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const extension = path.extname(file.originalname);
+    cb(null, `${uniqueSuffix}${extension}`);
+  },
+});
+
+// Initialize Multer for salesman images
+const uploadSalesman = multer({
+  storage: salesmanStorage,
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+});
+
+// Product image upload endpoint (LEAVE THIS UNTOUCHED)
+router.post('/upload/product-image/:productId', uploadProduct.single('image'), async (req, res) => {
   try {
     const { productId } = req.params;
 
@@ -83,6 +105,109 @@ router.post('/upload/product-image/:productId', upload.single('image'), async (r
     }
     return res.status(500).json({ message: 'Internal server error' });
   }
+});
+
+// SEPARATE SALESMAN IMAGE ENDPOINTS
+router.post('/upload/salesman-image/:customerId', uploadSalesman.single('image'), async (req, res) => {
+    try {
+        const { customerId } = req.params;
+
+        // Validate input
+        if (!req.file) {
+            return res.status(400).json({ 
+                status: false,
+                message: 'Image file is required' 
+            });
+        }
+
+        // First, get the old image filename if it exists
+        const getOldImageQuery = 'SELECT image FROM users WHERE customer_id = ? AND role = ?';
+        const oldImageResult = await executeQuery(getOldImageQuery, [customerId, 'admin']);
+        
+        // If there's an old image, delete it
+        if (oldImageResult.length > 0 && oldImageResult[0].image) {
+            const oldImagePath = path.join(__dirname, '..', 'uploads', 'salesman', oldImageResult[0].image);
+            try {
+                if (fs.existsSync(oldImagePath)) {
+                    await fs.promises.unlink(oldImagePath);
+                    console.log(`Deleted old image: ${oldImagePath}`);
+                }
+            } catch (deleteError) {
+                console.error('Error deleting old image:', deleteError);
+                // Continue with the upload even if old image deletion fails
+            }
+        }
+
+        // Get the new filename
+        const filename = req.file.filename;
+
+        // Update query to save new image filename
+        const updateQuery = 'UPDATE users SET image = ? WHERE customer_id = ? AND role = ?';
+        const updateValues = [filename, customerId, 'admin'];
+
+        // Execute the query
+        const result = await executeQuery(updateQuery, updateValues);
+
+        // Check if salesman exists
+        if (result.affectedRows > 0) {
+            // Construct the URL for the uploaded image
+            const imageUrl = `/images/salesman/${filename}`;
+            return res.status(200).json({
+                status: true,
+                message: 'Salesman image uploaded successfully',
+                data: {
+                    imageUrl,
+                    filename
+                }
+            });
+        } else {
+            // Delete the new uploaded file if salesman not found
+            await fs.promises.unlink(req.file.path);
+            return res.status(404).json({ 
+                status: false,
+                message: 'Salesman not found' 
+            });
+        }
+    } catch (error) {
+        console.error('Error uploading salesman image:', error);
+        // Clean up uploaded file on error
+        if (req.file) {
+            await fs.promises.unlink(req.file.path).catch((err) => console.error('Error deleting file:', err));
+        }
+        return res.status(500).json({ 
+            status: false,
+            message: 'Internal server error',
+            error: error.message 
+        });
+    }
+});
+
+// Get salesman image endpoint
+router.get('/images/salesman/:filename', (req, res) => {
+    const filename = req.params.filename;
+    const imagePath = path.join(__dirname, '..', 'uploads', 'salesman', filename);
+
+    // Check if file exists before sending
+    if (!fs.existsSync(imagePath)) {
+        return res.status(404).json({
+            status: false,
+            message: 'Salesman image not found'
+        });
+    }
+
+    // Set cache headers
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+    res.setHeader('Expires', new Date(Date.now() + 86400000).toUTCString());
+
+    res.sendFile(imagePath, (err) => {
+        if (err) {
+            console.error('Error sending salesman image:', err);
+            res.status(500).json({
+                status: false,
+                message: 'Error sending image file'
+            });
+        }
+    });
 });
 
 
@@ -430,7 +555,6 @@ router.get("/most-recent-order", async (req, res) => {
         res.status(500).json({ success: false, message: "Internal Server Error", error: error.message });
     }
 });
-
 
 
 
@@ -1173,7 +1297,6 @@ router.get('/admin/total-amount-paid', async (req, res) => {
 
 
 
-
 router.get('/fetch_credit_data', async (req, res) => {
     try {
         const query = 'SELECT * FROM credit_limit'; // Query to select all columns and rows
@@ -1852,9 +1975,6 @@ router.get("/allowed-shift", async (req, res) => {
 
 
 
-
-
-
 // API to get all orders
 router.get("/get-all-orders", async (req, res) => {
     try {
@@ -1997,7 +2117,6 @@ router.post("/customer_price_update", async (req, res) => {
 });
 
 
-
 router.get("/customer_price_check", async (req, res) => {
     try {
         const { customer_id } = req.query; // Assuming customer_id is passed as a query parameter
@@ -2035,7 +2154,7 @@ router.post("/update-auto-order-preferences", async (req, res) => {
 
         // Validate input
         if (!customer_id) {
-            return res.status(400).json({ message: "customer_id is required.", success: false });
+            return res.status(400).json({ message: "customer_id is required." });
         }
         if (auto_am_order !== 'Yes' && auto_am_order !== 'No' && auto_am_order !== null && auto_am_order !== undefined) {
             return res.status(400).json({ message: "Invalid value for auto_am_order. Must be 'Yes' or 'No'." });
@@ -2117,7 +2236,6 @@ router.post("/global-price-update", async (req, res) => {
         return res.status(500).json({ message: "Internal server error" });
     }
 });
-
 
 
 router.get("/fetch-all-invoices", async (req, res) => {
@@ -2232,7 +2350,6 @@ router.get("/fetch-all-invoices", async (req, res) => {
 });
 
 
-
 router.get("/fetch-total-paid", async (req, res) => {
     try {
         const customerId = req.query.customer_id;
@@ -2299,18 +2416,16 @@ router.get("/fetch-total-paid-by-day", async (req, res) => {
 });
 
 router.get('/images/products/:filename', (req, res) => {
-    const filename = req.params.filename;
-    const imagePath = path.join(__dirname, '..', 'uploads', 'products', filename);
+  const filename = req.params.filename;
+  const imagePath = path.join(__dirname, '..', 'uploads', 'products', filename);
   
-    res.sendFile(imagePath, (err) => {
-      if (err) {
-        console.error('Error sending image:', err);
-        res.status(404).send('Image not found');
-      }
-    });
+  res.sendFile(imagePath, (err) => {
+    if (err) {
+      console.error('Error sending image:', err);
+      res.status(404).send('Image not found');
+    }
   });
-
-
+});
 
 
 // GET /get-user-location/:customerId
@@ -2564,7 +2679,7 @@ router.post("/brand-crud", async (req, res) => {
                     readParams.push(id);
                 }
 
-                readQuery += " ORDER BY name";
+                readQuery += " ORDER BY name ASC";
                 const brands = await executeQuery(readQuery, readParams);
 
                 if (id && brands.length === 0) {
@@ -2958,7 +3073,7 @@ router.post("/route-crud", async (req, res) => {
                     readParams.push(id);
                 }
 
-                readQuery += " ORDER BY name";
+                readQuery += " ORDER BY name ASC";
                 const routes = await executeQuery(readQuery, readParams);
 
                 if (id && routes.length === 0) {
@@ -2980,21 +3095,6 @@ router.post("/route-crud", async (req, res) => {
                     return res.status(400).json({
                         success: false,
                         message: "Both route ID and name are required for update"
-                    });
-                }
-
-                // Check for duplicate route name in both tables (excluding current route)
-                const checkUpdateQuery = `
-                    SELECT 1 FROM routes WHERE name = ? AND id != ?
-                    UNION
-                    SELECT 1 FROM users WHERE route = ?
-                `;
-                const existingUpdateRoute = await executeQuery(checkUpdateQuery, [name, id, name]);
-                
-                if (existingUpdateRoute.length > 0) {
-                    return res.status(400).json({
-                        success: false,
-                        message: "Route with this name already exists in either routes table or users table"
                     });
                 }
 
@@ -3083,19 +3183,8 @@ router.post("/stockgroup-crud", async (req, res) => {
                     });
                 }
 
-                // Check for duplicate stock group name
-                const checkQuery = "SELECT DISTINCT stock_group FROM products WHERE stock_group = ?";
-                const existingStockGroup = await executeQuery(checkQuery, [name]);
-                
-                if (existingStockGroup.length > 0) {
-                    return res.status(400).json({
-                        success: false,
-                        message: "Stock group with this name already exists"
-                    });
-                }
-
-                // Insert new stock group by updating a product
-                const insertQuery = "INSERT INTO products (stock_group) VALUES (?)";
+                // Insert new stock group
+                const insertQuery = "INSERT INTO stock_groups (name) VALUES (?)";
                 const insertResult = await executeQuery(insertQuery, [name]);
 
                 return res.status(200).json({
@@ -3105,16 +3194,16 @@ router.post("/stockgroup-crud", async (req, res) => {
                 });
 
             case 'read':
-                // Read all unique stock groups
-                let readQuery = "SELECT DISTINCT stock_group as name FROM products WHERE stock_group IS NOT NULL";
+                // Read all stock groups or specific stock group
+                let readQuery = "SELECT id, name FROM stock_groups";
                 let readParams = [];
 
                 if (id) {
-                    readQuery += " AND id = ?";
+                    readQuery += " WHERE id = ?";
                     readParams.push(id);
                 }
 
-                readQuery += " ORDER BY stock_group";
+                readQuery += " ORDER BY name";
                 const stockGroups = await executeQuery(readQuery, readParams);
 
                 if (id && stockGroups.length === 0) {
@@ -3140,7 +3229,7 @@ router.post("/stockgroup-crud", async (req, res) => {
                 }
 
                 // Update stock group
-                const updateQuery = "UPDATE products SET stock_group = ? WHERE id = ?";
+                const updateQuery = "UPDATE stock_groups SET name = ? WHERE id = ?";
                 const updateResult = await executeQuery(updateQuery, [name, id]);
 
                 if (updateResult.affectedRows === 0) {
@@ -3164,19 +3253,8 @@ router.post("/stockgroup-crud", async (req, res) => {
                     });
                 }
 
-                // Check if stock group is being used by other products
-                const checkUsageQuery = "SELECT COUNT(*) as count FROM products WHERE stock_group = (SELECT stock_group FROM products WHERE id = ?)";
-                const stockGroupUsage = await executeQuery(checkUsageQuery, [id]);
-
-                if (stockGroupUsage[0].count > 1) {
-                    return res.status(400).json({
-                        success: false,
-                        message: "Cannot delete stock group as it is being used by other products"
-                    });
-                }
-
-                // Delete stock group by setting it to NULL
-                const deleteQuery = "UPDATE products SET stock_group = NULL WHERE id = ?";
+                // Delete stock group
+                const deleteQuery = "DELETE FROM stock_groups WHERE id = ?";
                 const deleteResult = await executeQuery(deleteQuery, [id]);
 
                 if (deleteResult.affectedRows === 0) {
@@ -3193,6 +3271,450 @@ router.post("/stockgroup-crud", async (req, res) => {
         }
     } catch (error) {
         console.error("Error in stock group CRUD operation:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
+            error: error.message
+        });
+    }
+});
+
+// Salesman Management Routes
+router.post("/add-salesman", async (req, res) => {
+  try {
+    const result = await adminService.addSalesmanService(req.body);
+    return res.status(result.statusCode).json(result.response);
+  } catch (error) {
+    console.error("Error in add-salesman route:", error);
+    return res.status(500).json({
+      status: false,
+      message: "Failed to add salesman: " + error.message
+    });
+  }
+});
+
+
+
+// Get all admin users (sales managers)
+router.get("/salesman-fetch", async (req, res) => {
+    try {
+        // Query to fetch all users with role 'ADMIN'
+        const query = `
+            SELECT * 
+            FROM users 
+            WHERE role = 'ADMIN'
+            ORDER BY name ASC
+        `;
+
+        const adminUsers = await executeQuery(query);
+
+        if (adminUsers.length === 0) {
+            return res.status(200).json({
+                status: true,
+                message: "No admin users found",
+                data: []
+            });
+        }
+
+        return res.status(200).json({
+            status: true,
+            message: "Admin users fetched successfully",
+            data: adminUsers
+        });
+
+    } catch (error) {
+        console.error("Error fetching admin users:", error);
+        return res.status(500).json({
+            status: false,
+            message: "Failed to fetch admin users: " + error.message
+        });
+    }
+});
+
+
+router.get("/block-status/:customer_id", async (req, res) => {
+    try {
+        const { customer_id } = req.params;
+
+        if (!customer_id) {
+            return res.status(400).json({
+                status: false,
+                message: "Customer ID is required"
+            });
+        }
+
+        // Read operation
+        const readQuery = "SELECT customer_id, name, status FROM users WHERE customer_id = ?";
+        const [user] = await executeQuery(readQuery, [customer_id]);
+
+        if (!user) {
+            return res.status(404).json({
+                status: false,
+                message: "User not found"
+            });
+        }
+
+        return res.status(200).json({
+            status: true,
+            message: "User status retrieved successfully",
+            data: {
+                customer_id: user.customer_id,
+                name: user.name,
+                status: user.status || 'active'
+            }
+        });
+
+    } catch (error) {
+        console.error("Error in get user status:", error);
+        return res.status(500).json({
+            status: false,
+            message: "Operation failed: " + error.message
+        });
+    }
+});
+
+// POST endpoint to update user status
+router.post("/update-block-status", async (req, res) => {
+    try {
+        const { customer_id, status } = req.body;
+
+        // Validate required fields
+        if (!customer_id) {
+            return res.status(400).json({
+                status: false,
+                message: "Customer ID is required"
+            });
+        }
+
+        if (!status) {
+            return res.status(400).json({
+                status: false,
+                message: "Status is required"
+            });
+        }
+
+        // Validate status value
+        if (status !== 'active' && status !== 'blocked') {
+            return res.status(400).json({
+                status: false,
+                message: "Status must be either 'active' or 'blocked'"
+            });
+        }
+
+        // Check if user exists
+        const checkQuery = "SELECT customer_id FROM users WHERE customer_id = ?";
+        const [existingUser] = await executeQuery(checkQuery, [customer_id]);
+
+        if (!existingUser) {
+            return res.status(404).json({
+                status: false,
+                message: "User not found"
+            });
+        }
+
+        // Update user status
+        const updateQuery = "UPDATE users SET status = ?, updated_at = UNIX_TIMESTAMP() WHERE customer_id = ?";
+        const result = await executeQuery(updateQuery, [status, customer_id]);
+
+        if (result.affectedRows === 0) {
+            return res.status(500).json({
+                status: false,
+                message: "Failed to update user status"
+            });
+        }
+
+        return res.status(200).json({
+            status: true,
+            message: `User status updated successfully to ${status}`,
+            data: {
+                customer_id,
+                status
+            }
+        });
+
+    } catch (error) {
+        console.error("Error in update user status:", error);
+        return res.status(500).json({
+            status: false,
+            message: "Operation failed: " + error.message
+        });
+    }
+});
+
+// Create new salesman
+router.post("/salesman-create", async (req, res) => {
+    try {
+        // Only username and customer_id are mandatory
+        const requiredFields = ['customer_id', 'username'];
+        
+        for (const field of requiredFields) {
+            if (!req.body[field]) {
+                return res.status(400).json({
+                    success: false,
+                    message: `${field} is required`
+                });
+            }
+        }
+
+        // Check if salesman already exists
+        const existingSalesman = await executeQuery(
+            "SELECT * FROM users WHERE customer_id = ?",
+            [req.body.customer_id]
+        );
+
+        if (existingSalesman.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Salesman already exists"
+            });
+        }
+
+        // Hash the phone number as password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(req.body.phone || req.body.customer_id, salt);
+
+        // Insert new salesman
+        const query = `
+            INSERT INTO users (
+                customer_id, 
+                username, 
+                name, 
+                phone,
+                address_line1,
+                designation,
+                route,
+                aadhar_number,
+                pan_number,
+                dl_number,
+                notes,
+                role,
+                password,
+                created_at, 
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admin', ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP())
+        `;
+
+        const values = [
+            req.body.customer_id,
+            req.body.username,
+            req.body.username, // Copy username to name field
+            req.body.phone || null,
+            req.body.address_line1 || null,
+            req.body.designation || null,
+            req.body.route || null,
+            req.body.aadhar_number || null,
+            req.body.pan_number || null,
+            req.body.dl_number || null,
+            req.body.notes || null,
+            hashedPassword
+        ];
+
+        const result = await executeQuery(query, values);
+
+        // If salesman has a route, find all users with same route and assign them
+        if (req.body.route) {
+            const findUsersQuery = `
+                SELECT customer_id FROM users 
+                WHERE route = ? AND role != 'admin'
+            `;
+            const usersResult = await executeQuery(findUsersQuery, [req.body.route]);
+
+            if (usersResult.length > 0) {
+                // Delete any existing assignments for these users
+                const deleteExistingQuery = `
+                    DELETE FROM admin_assign 
+                    WHERE customer_id IN (?)
+                `;
+                await executeQuery(deleteExistingQuery, [usersResult.map(u => u.customer_id)]);
+
+                // Insert new assignments for all users
+                const insertAssignmentQuery = `
+                    INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
+                    VALUES (?, ?, ?, NOW(), 'assigned', ?)
+                `;
+                
+                for (const user of usersResult) {
+                    await executeQuery(insertAssignmentQuery, [
+                        req.body.customer_id,
+                        user.customer_id,
+                        user.customer_id,
+                        req.body.route
+                    ]);
+                }
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Salesman created successfully",
+            data: { id: result.insertId }
+        });
+    } catch (error) {
+        console.error("Error creating salesman:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
+            error: error.message
+        });
+    }
+});
+
+// Update salesman data
+router.post("/salesman-update", async (req, res) => {
+    try {
+        const { customer_id, ...updateData } = req.body;
+
+        if (!customer_id) {
+            return res.status(400).json({
+                success: false,
+                message: "Customer ID is required"
+            });
+        }
+
+        if (Object.keys(updateData).length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "No fields to update"
+            });
+        }
+
+        // Check if salesman exists
+        const existingSalesman = await executeQuery(
+            "SELECT * FROM users WHERE customer_id = ? AND role = 'admin'",
+            [customer_id]
+        );
+
+        if (existingSalesman.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Salesman not found"
+            });
+        }
+
+        // Build update query dynamically based on provided fields
+        let updateFields = [];
+        let values = [];
+
+        // List of fields that can be updated
+        const allowedFields = [
+            'username',
+            'name',
+            'phone',
+            'address_line1',
+            'designation',
+            'route',
+            'aadhar_number',
+            'pan_number',
+            'dl_number',
+            'notes'
+        ];
+
+        // Add fields to update if they are provided
+        allowedFields.forEach(field => {
+            if (updateData[field] !== undefined) {
+                updateFields.push(`${field} = ?`);
+                values.push(updateData[field]);
+            }
+        });
+
+        // Add updated_at timestamp
+        updateFields.push('updated_at = UNIX_TIMESTAMP()');
+
+        // Add customer_id to values array for WHERE clause
+        values.push(customer_id);
+
+        const query = `
+            UPDATE users 
+            SET ${updateFields.join(', ')}
+            WHERE customer_id = ? AND role = 'admin'
+        `;
+
+        const result = await executeQuery(query, values);
+
+        // If route is being updated, handle admin assignments
+        if (updateData.route !== undefined) {
+            // Find all users with the new route
+            const findUsersQuery = `
+                SELECT customer_id FROM users 
+                WHERE route = ? AND role != 'admin'
+            `;
+            const usersResult = await executeQuery(findUsersQuery, [updateData.route]);
+
+            if (usersResult.length > 0) {
+                // Delete any existing assignments for these users
+                const deleteExistingQuery = `
+                    DELETE FROM admin_assign 
+                    WHERE customer_id IN (?)
+                `;
+                await executeQuery(deleteExistingQuery, [usersResult.map(u => u.customer_id)]);
+
+                // Insert new assignments for all users
+                const insertAssignmentQuery = `
+                    INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
+                    VALUES (?, ?, ?, NOW(), 'assigned', ?)
+                `;
+                
+                for (const user of usersResult) {
+                    await executeQuery(insertAssignmentQuery, [
+                        customer_id,
+                        user.customer_id,
+                        user.customer_id,
+                        updateData.route
+                    ]);
+                }
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Salesman updated successfully"
+        });
+    } catch (error) {
+        console.error("Error updating salesman:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
+            error: error.message
+        });
+    }
+});
+
+// Read salesman data
+router.get("/salesman-read", async (req, res) => {
+    try {
+        const { customer_id } = req.query;
+        
+        let readQuery = `
+            SELECT customer_id, username, phone, address_line1, designation,route,image,
+                   aadhar_number, pan_number, dl_number, notes
+            FROM users
+            WHERE role = 'admin'
+        `;
+        let readParams = [];
+
+        if (customer_id) {
+            readQuery += " AND customer_id = ?";
+            readParams.push(customer_id);
+        }
+
+        readQuery += " ORDER BY username ASC";
+        const salesmen = await executeQuery(readQuery, readParams);
+
+        if (customer_id && salesmen.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Salesman not found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Salesman data fetched successfully",
+            data: customer_id ? salesmen[0] : salesmen
+        });
+    } catch (error) {
+        console.error("Error reading salesman data:", error);
         return res.status(500).json({
             success: false,
             message: "Internal server error",

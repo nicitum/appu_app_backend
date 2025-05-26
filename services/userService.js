@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const {
   findUserByUserName,
+  findUserByPhone,
   getUserById,
   changePassword,
   updateUser,
@@ -9,15 +10,20 @@ const {
   getMonthlyTotals,
   getDefectReportByCustomerId,
   insertDefaultOrder,
+  resetPassword,
+  getAdminAssignments
 } = require("./dbUtility");
 const { getProductsWithDetails } = require("../helpers/productDetailsMap");
 const { getTransactionsForMonth } = require("./transactionService");
 
 const loginUser = async (username, password) => {
   try {
-    const user = await findUserByUserName(username);
-
-    if (!user || !user.username) {
+    console.log("Login attempt with phone:", username);
+    
+    // Find user by phone number
+    const user = await findUserByPhone(username);
+    
+    if (!user) {
       return {
         statusCode: 400,
         response: {
@@ -27,7 +33,7 @@ const loginUser = async (username, password) => {
       };
     }
 
-    if (user && user.status !== "Active") {
+    if (user.status !== "active") {
       return {
         statusCode: 400,
         response: {
@@ -37,6 +43,7 @@ const loginUser = async (username, password) => {
       };
     }
 
+    // Compare the provided password with the stored hashed password using bcrypt
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
@@ -50,7 +57,7 @@ const loginUser = async (username, password) => {
     }
 
     const token = jwt.sign(
-      { id: user.customer_id ,id1: user.id ,username: user.username, role: user.role },
+      { id: user.customer_id, id1: user.id, username: user.username, role: user.role },
       "appu",
       { expiresIn: "1h" }
     );
@@ -65,6 +72,7 @@ const loginUser = async (username, password) => {
         status: true,
         message: "Login successful",
         token,
+        role: user.role
       },
     };
   } catch (err) {
@@ -95,17 +103,17 @@ const getUserDetailsByCustomerId = async (customerId) => {
   }
 };
 
-const changePasswordService = async (id, oldPassword, newPassword) => {
+const changePasswordService = async (id, newPassword) => {
   try {
-    // Fetch user details and verify old password
-    const user = await changePassword(id, oldPassword, newPassword);
+    // Update password without old password verification
+    const result = await changePassword(id, newPassword);
 
-    if (!user) {
+    if (!result) {
       return {
         statusCode: 400,
         response: {
           status: false,
-          message: "Old password is incorrect.",
+          message: "Failed to update password.",
         },
       };
     }
@@ -169,10 +177,33 @@ const createDefaultOrderService = async (customerId, products) => {
   }
 };
 
+const resetPasswordService = async (phone, newPassword) => {
+  try {
+    const result = await resetPassword(phone, newPassword);
+    return {
+      statusCode: 200,
+      response: {
+        status: true,
+        message: "Password reset successful"
+      }
+    };
+  } catch (err) {
+    console.error("Error in resetPasswordService:", err);
+    return {
+      statusCode: 400,
+      response: {
+        status: false,
+        message: err.message || "Password reset failed"
+      }
+    };
+  }
+};
+
 module.exports = {
   loginUser,
   getUserDetailsByCustomerId,
   changePasswordService,
   orderHistoryService,
   createDefaultOrderService,
+  resetPasswordService
 };
