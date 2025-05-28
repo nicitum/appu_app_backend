@@ -1,5 +1,6 @@
 const adminService = require("../services/adminService");
 const bcrypt = require("bcryptjs");
+const dbUtility = require("../services/dbUtility");
 
 exports.addUserController = async (req, res) => {
   try {
@@ -147,7 +148,10 @@ exports.addProductController = async (req, res) => {
       type_of_supply,
       maintain_batches,
       stock_quantity,
-      cost_price
+      cost_price,
+      auom,
+      uom_qty,
+      auom_qty
     } = req.body;
 
     // Validate required fields
@@ -179,7 +183,10 @@ exports.addProductController = async (req, res) => {
       type_of_supply: type_of_supply || null,
       maintain_batches: maintain_batches || 0,
       stock_quantity: stock_quantity || 0,
-      cost_price: cost_price || 0
+      cost_price: cost_price || 0,
+      auom: auom || null,
+      uom_qty: uom_qty || null,
+      auom_qty: auom_qty || null
     };
 
     const addResponse = await adminService.addProductService(productData);
@@ -273,6 +280,60 @@ exports.approveDefectReportController = async (req, res) => {
     console.error("Error approving defect report:", error);
     return res.status(500).json({
       message: error.message,
+    });
+  }
+};
+
+// Add new controller for AUOM operations
+exports.auomController = async (req, res) => {
+  try {
+    const { operation, name } = req.body;
+
+    switch (operation.toLowerCase()) {
+      case 'create':
+        if (!name) {
+          return res.status(400).json({
+            status: "error",
+            message: "AUOM name is required for creation"
+          });
+        }
+
+        const createQuery = "INSERT INTO auom (name) VALUES (?)";
+        const createResult = await dbUtility.executeQuery(createQuery, [name]);
+
+        if (createResult.affectedRows > 0) {
+          return res.status(200).json({
+            status: "success",
+            message: "AUOM created successfully",
+            data: {
+              id: createResult.insertId,
+              name
+            }
+          });
+        }
+        break;
+
+      case 'read':
+        const readQuery = "SELECT id, name FROM auom ORDER BY name ASC";
+        const auomList = await dbUtility.executeQuery(readQuery);
+
+        return res.status(200).json({
+          status: "success",
+          message: "AUOM list fetched successfully",
+          data: auomList
+        });
+
+      default:
+        return res.status(400).json({
+          status: "error",
+          message: "Invalid operation. Use 'create' or 'read'"
+        });
+    }
+  } catch (error) {
+    console.error("Error in AUOM controller:", error);
+    res.status(500).json({
+      status: "error",
+      message: error.message
     });
   }
 };

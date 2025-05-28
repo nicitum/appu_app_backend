@@ -3723,6 +3723,177 @@ router.get("/salesman-read", async (req, res) => {
     }
 });
 
+// POST /update-user-location
+router.post("/update-user-location", async (req, res) => {
+    try {
+        const { customer_id, latitude, longitude } = req.body;
+
+        // Validate required fields
+        if (!customer_id) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Customer ID is required" 
+            });
+        }
+
+        if (latitude === undefined || longitude === undefined) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Both latitude and longitude are required" 
+            });
+        }
+
+        // Validate latitude and longitude are valid numbers
+        const lat = parseFloat(latitude);
+        const lng = parseFloat(longitude);
+
+        if (isNaN(lat) || isNaN(lng)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Latitude and longitude must be valid numbers" 
+            });
+        }
+
+        // Validate latitude range (-90 to 90)
+        if (lat < -90 || lat > 90) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Latitude must be between -90 and 90 degrees" 
+            });
+        }
+
+        // Validate longitude range (-180 to 180)
+        if (lng < -180 || lng > 180) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Longitude must be between -180 and 180 degrees" 
+            });
+        }
+
+        // Check if user exists
+        const checkUserQuery = "SELECT customer_id FROM users WHERE customer_id = ?";
+        const userExists = await executeQuery(checkUserQuery, [customer_id]);
+
+        if (userExists.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        // Update location
+        const updateLocationQuery = `
+            UPDATE users 
+            SET latitude = ?, 
+                longitude = ?,
+                updated_at = UNIX_TIMESTAMP()
+            WHERE customer_id = ?
+        `;
+        
+        const result = await executeQuery(updateLocationQuery, [lat, lng, customer_id]);
+
+        if (result.affectedRows > 0) {
+            console.log(`Updated location for customer ID: ${customer_id}`, { latitude: lat, longitude: lng });
+            return res.json({
+                success: true,
+                message: "User location updated successfully",
+                data: {
+                    customer_id,
+                    latitude: lat,
+                    longitude: lng
+                }
+            });
+        } else {
+            return res.status(500).json({
+                success: false,
+                message: "Failed to update user location"
+            });
+        }
+    } catch (error) {
+        console.error("Error updating user location:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error",
+            error: error.message
+        });
+    }
+});
+
+// POST /auom-crud
+router.post("/auom-crud", async (req, res) => {
+    try {
+        const { operation, name } = req.body;
+
+        // Validate operation type
+        if (!operation || !['create', 'read'].includes(operation.toLowerCase())) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid operation (create/read) is required"
+            });
+        }
+
+        switch (operation.toLowerCase()) {
+            case 'create':
+                // Validate input for create
+                if (!name) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "AUOM name is required for creation"
+                    });
+                }
+
+                // Check if AUOM name already exists
+                const checkAuomQuery = "SELECT id FROM auom WHERE name = ?";
+                const existingAuom = await executeQuery(checkAuomQuery, [name]);
+
+                if (existingAuom.length > 0) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "AUOM with this name already exists"
+                    });
+                }
+
+                // Create new AUOM
+                const createQuery = "INSERT INTO auom (name) VALUES (?)";
+                const createResult = await executeQuery(createQuery, [name]);
+
+                if (createResult.affectedRows > 0) {
+                    return res.status(200).json({
+                        success: true,
+                        message: "AUOM created successfully",
+                        data: {
+                            id: createResult.insertId,
+                            name
+                        }
+                    });
+                } else {
+                    return res.status(500).json({
+                        success: false,
+                        message: "Failed to create AUOM"
+                    });
+                }
+
+            case 'read':
+                // Read all AUOMs
+                const readQuery = "SELECT id, name FROM auom ORDER BY name ASC";
+                const auomList = await executeQuery(readQuery);
+
+                return res.status(200).json({
+                    success: true,
+                    message: "AUOM list fetched successfully",
+                    data: auomList
+                });
+        }
+    } catch (error) {
+        console.error("Error in AUOM CRUD operation:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
+            error: error.message
+        });
+    }
+});
+
 module.exports = router;
 
 

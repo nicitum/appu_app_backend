@@ -635,9 +635,12 @@ const addProduct = async (productData) => {
         type_of_supply,
         maintain_batches,
         stock_quantity,
-        cost_price
+        cost_price,
+        auom,
+        uom_qty,
+        auom_qty
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const values = [
@@ -658,7 +661,10 @@ const addProduct = async (productData) => {
       productData.type_of_supply,
       productData.maintain_batches,
       productData.stock_quantity,
-      productData.cost_price
+      productData.cost_price,
+      productData.auom || null,
+      productData.uom_qty || null,
+      productData.auom_qty || null
     ];
 
     const response = await executeQuery(query, values);
