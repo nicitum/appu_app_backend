@@ -13,6 +13,7 @@ const {
   resetPassword,
   getAdminAssignments
 } = require("./dbUtility");
+const { executeQuery } = require("../dbUtils/db");
 const { getProductsWithDetails } = require("../helpers/productDetailsMap");
 const { getTransactionsForMonth } = require("./transactionService");
 
@@ -62,6 +63,10 @@ const loginUser = async (username, password) => {
       { expiresIn: "1h" }
     );
 
+    // First update login count
+    await executeQuery("UPDATE users SET login_count = login_count + 1 WHERE customer_id = ?", [user.customer_id]);
+    
+    // Then update last login
     await updateUser(user.customer_id, {
       last_login: Math.floor(Date.now() / 1000),
     });
@@ -103,17 +108,17 @@ const getUserDetailsByCustomerId = async (customerId) => {
   }
 };
 
-const changePasswordService = async (id, newPassword) => {
+const changePasswordService = async (id, oldPassword, newPassword) => {
   try {
-    // Update password without old password verification
-    const result = await changePassword(id, newPassword);
+    // Fetch user details and verify old password
+    const user = await changePassword(id, oldPassword, newPassword);
 
-    if (!result) {
+    if (!user) {
       return {
         statusCode: 400,
         response: {
           status: false,
-          message: "Failed to update password.",
+          message: "Old password is incorrect.",
         },
       };
     }
@@ -129,6 +134,7 @@ const changePasswordService = async (id, newPassword) => {
     throw new Error(err.message || "Internal Server Error");
   }
 };
+
 
 const orderHistoryService = async (customerId, params) => {
   try {

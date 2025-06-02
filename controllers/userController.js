@@ -98,17 +98,18 @@ const userDetailsController = async (req, res) => {
 const changePasswordController = async (req, res) => {
   try {
     const customer_id = req.userID;
-    const { newPassword } = req.body;
+    const { oldPassword, newPassword } = req.body;
 
-    if (!newPassword) {
+    if (!oldPassword || !newPassword) {
       return res.status(400).json({
         status: false,
-        message: "New password is required.",
+        message: "Old password and new password are required.",
       });
     }
 
     const changePasswordResponse = await userService.changePasswordService(
       customer_id,
+      oldPassword,
       newPassword
     );
 

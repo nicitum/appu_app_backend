@@ -33,7 +33,9 @@ const corsOptions = {
     'http://localhost:5174', // For local development
     'http://127.0.0.1:5173', // For local development
     'http://147.93.110.150:3001', // Additional frontend origin if applicable
-    'http://localhost:8081', // Additional local origin
+    'http://localhost:8081',
+    'http://localhost:8082',
+    //  // Additional local origin
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept'],

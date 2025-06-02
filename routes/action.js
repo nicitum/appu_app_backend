@@ -3281,16 +3281,22 @@ router.post("/stockgroup-crud", async (req, res) => {
 
 // Salesman Management Routes
 router.post("/add-salesman", async (req, res) => {
-  try {
-    const result = await adminService.addSalesmanService(req.body);
-    return res.status(result.statusCode).json(result.response);
-  } catch (error) {
-    console.error("Error in add-salesman route:", error);
-    return res.status(500).json({
-      status: false,
-      message: "Failed to add salesman: " + error.message
-    });
-  }
+    try {
+        // Convert comma-separated routes to JSON array before passing to service
+        if (req.body.route) {
+            const routes = req.body.route.split(',').map(r => r.trim());
+            req.body.route = JSON.stringify(routes);
+        }
+
+        const result = await adminService.addSalesmanService(req.body);
+        return res.status(result.statusCode).json(result.response);
+    } catch (error) {
+        console.error("Error in add-salesman route:", error);
+        return res.status(500).json({
+            status: false,
+            message: "Failed to add salesman: " + error.message
+        });
+    }
 });
 
 
@@ -3473,6 +3479,16 @@ router.post("/salesman-create", async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(req.body.phone || req.body.customer_id, salt);
 
+        // Store route as comma-separated string (not JSON)
+        let routeString = null;
+        if (req.body.route) {
+            if (Array.isArray(req.body.route)) {
+                routeString = req.body.route.join(",");
+            } else {
+                routeString = req.body.route;
+            }
+        }
+
         // Insert new salesman
         const query = `
             INSERT INTO users (
@@ -3502,7 +3518,7 @@ router.post("/salesman-create", async (req, res) => {
             req.body.phone || null,
             req.body.address_line1 || null,
             req.body.designation || null,
-            req.body.route || null,
+            routeString,
             req.body.aadhar_number || null,
             req.body.pan_number || null,
             req.body.dl_number || null,
@@ -3510,37 +3526,49 @@ router.post("/salesman-create", async (req, res) => {
             hashedPassword
         ];
 
-        const result = await executeQuery(query, values);
+        await executeQuery(query, values);
 
-        // If salesman has a route, find all users with same route and assign them
-        if (req.body.route) {
-            const findUsersQuery = `
-                SELECT customer_id FROM users 
-                WHERE route = ? AND role != 'admin'
-            `;
-            const usersResult = await executeQuery(findUsersQuery, [req.body.route]);
+        // Fetch the salesman's id from users table
+        const salesmanRow = await executeQuery("SELECT id FROM users WHERE customer_id = ? AND role = 'admin'", [req.body.customer_id]);
+        if (!salesmanRow.length) {
+            return res.status(500).json({ success: false, message: "Failed to fetch salesman id after creation" });
+        }
+        const salesmanId = salesmanRow[0].id;
 
-            if (usersResult.length > 0) {
-                // Delete any existing assignments for these users
-                const deleteExistingQuery = `
-                    DELETE FROM admin_assign 
-                    WHERE customer_id IN (?)
+        // Assign users for each route
+        if (routeString) {
+            const routes = routeString.split(',').map(r => r.trim());
+            for (const route of routes) {
+                const findUsersQuery = `
+                    SELECT customer_id FROM users 
+                    WHERE route = ? AND role != 'admin'
                 `;
-                await executeQuery(deleteExistingQuery, [usersResult.map(u => u.customer_id)]);
-
-                // Insert new assignments for all users
-                const insertAssignmentQuery = `
-                    INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
-                    VALUES (?, ?, ?, NOW(), 'assigned', ?)
-                `;
-                
-                for (const user of usersResult) {
-                    await executeQuery(insertAssignmentQuery, [
-                        req.body.customer_id,
-                        user.customer_id,
-                        user.customer_id,
-                        req.body.route
-                    ]);
+                const usersResult = await executeQuery(findUsersQuery, [route]);
+                if (usersResult.length > 0) {
+                    const insertAssignmentQuery = `
+                        INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
+                        VALUES (?, ?, ?, NOW(), 'assigned', ?)
+                    `;
+                    for (const user of usersResult) {
+                        // Check for existing assignment
+                        const checkAssignmentQuery = `
+                            SELECT 1 FROM admin_assign
+                            WHERE admin_id = ? AND customer_id = ? AND route = ?
+                        `;
+                        const exists = await executeQuery(checkAssignmentQuery, [
+                            salesmanId,
+                            user.customer_id,
+                            route
+                        ]);
+                        if (exists.length === 0) {
+                            await executeQuery(insertAssignmentQuery, [
+                                salesmanId,
+                                user.customer_id,
+                                user.customer_id,
+                                route
+                            ]);
+                        }
+                    }
                 }
             }
         }
@@ -3548,7 +3576,7 @@ router.post("/salesman-create", async (req, res) => {
         return res.status(200).json({
             success: true,
             message: "Salesman created successfully",
-            data: { id: result.insertId }
+            data: { id: salesmanId }
         });
     } catch (error) {
         console.error("Error creating salesman:", error);
@@ -3577,6 +3605,17 @@ router.post("/salesman-update", async (req, res) => {
                 success: false,
                 message: "No fields to update"
             });
+        }
+
+        // Store route as comma-separated string (not JSON)
+        let routeString = undefined;
+        if (updateData.route) {
+            if (Array.isArray(updateData.route)) {
+                routeString = updateData.route.join(",");
+            } else {
+                routeString = updateData.route;
+            }
+            updateData.route = routeString;
         }
 
         // Check if salesman exists
@@ -3630,38 +3669,68 @@ router.post("/salesman-update", async (req, res) => {
             WHERE customer_id = ? AND role = 'admin'
         `;
 
-        const result = await executeQuery(query, values);
+        if ((await executeQuery(query, values)).affectedRows === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Salesman not found or no changes made"
+            });
+        }
 
-        // If route is being updated, handle admin assignments
-        if (updateData.route !== undefined) {
-            // Find all users with the new route
-            const findUsersQuery = `
-                SELECT customer_id FROM users 
-                WHERE route = ? AND role != 'admin'
-            `;
-            const usersResult = await executeQuery(findUsersQuery, [updateData.route]);
+        // Fetch the salesman's id from users table
+        const salesmanRow = await executeQuery("SELECT id FROM users WHERE customer_id = ? AND role = 'admin'", [customer_id]);
+        if (!salesmanRow.length) {
+            return res.status(500).json({ success: false, message: "Failed to fetch salesman id after update" });
+        }
+        const salesmanId = salesmanRow[0].id;
 
-            if (usersResult.length > 0) {
-                // Delete any existing assignments for these users
-                const deleteExistingQuery = `
-                    DELETE FROM admin_assign 
-                    WHERE customer_id IN (?)
+        // Assign users for each route
+        if (routeString !== undefined) {
+            const routes = routeString.split(',').map(r => r.trim());
+
+            // 1. Delete assignments for this salesman that are NOT in the new routes
+            if (routes.length > 0) {
+                const deleteQuery = `
+                    DELETE FROM admin_assign
+                    WHERE admin_id = ? AND route NOT IN (${routes.map(() => '?').join(',')})
                 `;
-                await executeQuery(deleteExistingQuery, [usersResult.map(u => u.customer_id)]);
+                await executeQuery(deleteQuery, [salesmanId, ...routes]);
+            } else {
+                // If no routes, remove all assignments for this salesman
+                await executeQuery('DELETE FROM admin_assign WHERE admin_id = ?', [salesmanId]);
+            }
 
-                // Insert new assignments for all users
-                const insertAssignmentQuery = `
-                    INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
-                    VALUES (?, ?, ?, NOW(), 'assigned', ?)
+            // Now assign users for each route (avoiding duplicates)
+            for (const route of routes) {
+                const findUsersQuery = `
+                    SELECT customer_id FROM users 
+                    WHERE route = ? AND role != 'admin'
                 `;
-                
-                for (const user of usersResult) {
-                    await executeQuery(insertAssignmentQuery, [
-                        customer_id,
-                        user.customer_id,
-                        user.customer_id,
-                        updateData.route
-                    ]);
+                const usersResult = await executeQuery(findUsersQuery, [route]);
+                if (usersResult.length > 0) {
+                    const insertAssignmentQuery = `
+                        INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
+                        VALUES (?, ?, ?, NOW(), 'assigned', ?)
+                    `;
+                    for (const user of usersResult) {
+                        // Check for existing assignment
+                        const checkAssignmentQuery = `
+                            SELECT 1 FROM admin_assign
+                            WHERE admin_id = ? AND customer_id = ? AND route = ?
+                        `;
+                        const exists = await executeQuery(checkAssignmentQuery, [
+                            salesmanId,
+                            user.customer_id,
+                            route
+                        ]);
+                        if (exists.length === 0) {
+                            await executeQuery(insertAssignmentQuery, [
+                                salesmanId,
+                                user.customer_id,
+                                user.customer_id,
+                                route
+                            ]);
+                        }
+                    }
                 }
             }
         }
@@ -3890,6 +3959,156 @@ router.post("/auom-crud", async (req, res) => {
             success: false,
             message: "Internal server error",
             error: error.message
+        });
+    }
+});
+
+// Get user login count
+router.get("/login_counts", async (req, res) => {
+    try {
+        const { customer_id } = req.query;
+
+        if (!customer_id) {
+            return res.status(400).json({
+                status: false,
+                message: "Customer ID is required"
+            });
+        }
+
+        const query = "SELECT login_count FROM users WHERE customer_id = ?";
+        const result = await executeQuery(query, [customer_id]);
+
+        if (result.length === 0) {
+            return res.status(404).json({
+                status: false,
+                message: "User not found"
+            });
+        }
+
+        return res.status(200).json({
+            status: true,
+            data: {
+                login_count: result[0].login_count
+            }
+        });
+
+    } catch (error) {
+        console.error("Error fetching login count:", error);
+        return res.status(500).json({
+            status: false,
+            message: "Internal server error"
+        });
+    }
+});
+
+// App User Management API
+router.route("/app_user")
+    // GET - Retrieve app_user status
+    .get(async (req, res) => {
+        try {
+            const { customer_id } = req.query;
+            
+            if (!customer_id) {
+                return res.status(400).json({
+                    success: false,
+                    message: "customer_id is required"
+                });
+            }
+
+            const result = await executeQuery(
+                "SELECT app_user FROM users WHERE customer_id = ?",
+                [customer_id]
+            );
+
+            if (result.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "User not found"
+                });
+            }
+
+            return res.json({
+                success: true,
+                data: {
+                    app_user: result[0].app_user
+                }
+            });
+        } catch (error) {
+            console.error("Error in app-user GET:", error);
+            return res.status(500).json({
+                success: false,
+                message: "Operation failed: " + error.message
+            });
+        }
+    })
+    // PUT - Update app_user
+    .put(async (req, res) => {
+        try {
+            const { customer_id, app_user } = req.body;
+            
+            if (!customer_id || app_user === undefined) {
+                return res.status(400).json({
+                    success: false,
+                    message: "customer_id and app_user are required"
+                });
+            }
+
+            // Check if user exists
+            const userExists = await executeQuery(
+                "SELECT customer_id FROM users WHERE customer_id = ?",
+                [customer_id]
+            );
+
+            if (userExists.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "User not found"
+                });
+            }
+
+            // Update app_user status
+            await executeQuery(
+                "UPDATE users SET app_user = ? WHERE customer_id = ?",
+                [app_user, customer_id]
+            );
+
+            return res.json({
+                success: true,
+                message: "App user status updated successfully"
+            });
+        } catch (error) {
+            console.error("Error in app-user PUT:", error);
+            return res.status(500).json({
+                success: false,
+                message: "Operation failed: " + error.message
+            });
+        }
+    });
+
+// Count App Users
+router.get("/app_user_count", async (req, res) => {
+    try {
+        const result = await executeQuery(
+            "SELECT " +
+            "COUNT(*) as total_users, " +
+            "SUM(CASE WHEN app_user = 'Yes' THEN 1 ELSE 0 END) as yes_count, " +
+            "SUM(CASE WHEN app_user = 'No' THEN 1 ELSE 0 END) as no_count " +
+            "FROM users WHERE role = 'user'"
+        );
+
+        return res.json({
+            success: true,
+            data: {
+                total_users: result[0].total_users || 0,
+                app_users_yes: result[0].yes_count || 0,
+                app_users_no: result[0].no_count || 0
+            }
+        });
+    } catch (error) {
+        console.error("Error in app_user_count:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Operation failed: " + error.message
         });
     }
 });

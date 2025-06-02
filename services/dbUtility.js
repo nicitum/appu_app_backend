@@ -456,30 +456,6 @@ const addUser = async (userDetails) => {
 
     const result = await executeQuery(query, values);
 
-    // If user is not an admin, find and assign to admin based on route
-    if (userDetails.role !== 'admin') {
-      const findAdminQuery = `
-        SELECT id FROM users 
-        WHERE route = ? AND role = 'admin' 
-        LIMIT 1
-      `;
-      const adminResult = await executeQuery(findAdminQuery, [userDetails.route]);
-
-      if (adminResult.length > 0) {
-        const adminId = adminResult[0].id;
-        const insertAssignmentQuery = `
-          INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
-          VALUES (?, ?, ?, NOW(), 'assigned', ?)
-        `;
-        await executeQuery(insertAssignmentQuery, [
-          adminId,
-          userDetails.customer_id,
-          userDetails.customer_id,
-          userDetails.route
-        ]);
-      }
-    }
-
     return result.insertId;
   } catch (error) {
     console.error("Error in addUser:", error);
@@ -677,13 +653,18 @@ const addProduct = async (productData) => {
 };
 
 
-const changePassword = async (id, newPassword) => {
+const changePassword = async (id, oldPassword, newPassword) => {
   try {
-    const query = `SELECT customer_id FROM users WHERE customer_id = ?`;
+    const query = `SELECT password FROM users WHERE customer_id = ?`;
     const [user] = await executeQuery(query, [id]);
 
     if (!user) {
       throw new Error("User not found.");
+    }
+
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch) {
+      return null;
     }
 
     const salt = await bcrypt.genSalt(10);
@@ -702,6 +683,7 @@ const changePassword = async (id, newPassword) => {
     throw new Error("Failed to change password.");
   }
 };
+
 
 const updateUser = async (customer_id, userDetails) => {
   try {
@@ -1194,193 +1176,6 @@ const getAdminAssignments = async (customerId) => {
   }
 };
 
-const addSalesman = async (salesmanDetails) => {
-  try {
-    // Check if salesman already exists
-    const existingSalesman = await executeQuery(
-      "SELECT * FROM users WHERE customer_id = ?",
-      [salesmanDetails.customer_id]
-    );
-
-    if (existingSalesman.length > 0) {
-      throw new Error("Salesman already exists");
-    }
-
-    // Hash the phone number as password with bcrypt
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(salesmanDetails.phone || salesmanDetails.customer_id, salt);
-
-    // Insert new salesman
-    const query = `
-      INSERT INTO users (
-        customer_id, 
-        username, 
-        name, 
-        phone,
-        address_line1,
-        designation,
-        route,
-        aadhar_number,
-        pan_number,
-        dl_number,
-        notes,
-        role,
-        password,
-        created_at, 
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admin', ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP())
-    `;
-
-    const values = [
-      salesmanDetails.customer_id,
-      salesmanDetails.username,
-      salesmanDetails.username, // Copy username to name field
-      salesmanDetails.phone || null,
-      salesmanDetails.address_line1 || null,
-      salesmanDetails.designation || null,
-      salesmanDetails.route || null,
-      salesmanDetails.aadhar_number || null,
-      salesmanDetails.pan_number || null,
-      salesmanDetails.dl_number || null,
-      salesmanDetails.notes || null,
-      hashedPassword
-    ];
-
-    const result = await executeQuery(query, values);
-
-    // If salesman has a route, find all users with same route and assign them
-    if (salesmanDetails.route) {
-      const findUsersQuery = `
-        SELECT customer_id FROM users 
-        WHERE route = ? AND role != 'admin'
-      `;
-      const usersResult = await executeQuery(findUsersQuery, [salesmanDetails.route]);
-
-      if (usersResult.length > 0) {
-        // Delete any existing assignments for these users
-        const deleteExistingQuery = `
-          DELETE FROM admin_assign 
-          WHERE customer_id IN (?)
-        `;
-        await executeQuery(deleteExistingQuery, [usersResult.map(u => u.customer_id)]);
-
-        // Insert new assignments for all users
-        const insertAssignmentQuery = `
-          INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
-          VALUES (?, ?, ?, NOW(), 'assigned', ?)
-        `;
-        
-        for (const user of usersResult) {
-          await executeQuery(insertAssignmentQuery, [
-            salesmanDetails.customer_id,
-            user.customer_id,
-            user.customer_id,
-            salesmanDetails.route
-          ]);
-        }
-      }
-    }
-
-    return result.insertId;
-  } catch (error) {
-    console.error("Error in addSalesman:", error);
-    throw new Error("Salesman creation failed: " + error.message);
-  }
-};
-
-const updateSalesman = async (customer_id, salesmanDetails) => {
-  try {
-    // Check if salesman exists
-    const existingSalesman = await executeQuery(
-      "SELECT * FROM users WHERE customer_id = ? AND role = 'admin'",
-      [customer_id]
-    );
-
-    if (existingSalesman.length === 0) {
-      throw new Error("Salesman not found");
-    }
-
-    // Build update query dynamically based on provided fields
-    let updateFields = [];
-    let values = [];
-
-    // List of fields that can be updated
-    const allowedFields = [
-      'username',
-      'name',
-      'phone',
-      'address_line1',
-      'designation',
-      'route',
-      'aadhar_number',
-      'pan_number',
-      'dl_number',
-      'notes'
-    ];
-
-    // Add fields to update if they are provided
-    allowedFields.forEach(field => {
-      if (salesmanDetails[field] !== undefined) {
-        updateFields.push(`${field} = ?`);
-        values.push(salesmanDetails[field]);
-      }
-    });
-
-    // Add updated_at timestamp
-    updateFields.push('updated_at = UNIX_TIMESTAMP()');
-
-    // Add customer_id to values array for WHERE clause
-    values.push(customer_id);
-
-    const query = `
-      UPDATE users 
-      SET ${updateFields.join(', ')}
-      WHERE customer_id = ? AND role = 'admin'
-    `;
-
-    const result = await executeQuery(query, values);
-
-    // If route is being updated, handle admin assignments
-    if (salesmanDetails.route !== undefined) {
-      // Find all users with the new route
-      const findUsersQuery = `
-        SELECT customer_id FROM users 
-        WHERE route = ? AND role != 'admin'
-      `;
-      const usersResult = await executeQuery(findUsersQuery, [salesmanDetails.route]);
-
-      if (usersResult.length > 0) {
-        // Delete any existing assignments for these users
-        const deleteExistingQuery = `
-          DELETE FROM admin_assign 
-          WHERE customer_id IN (?)
-        `;
-        await executeQuery(deleteExistingQuery, [usersResult.map(u => u.customer_id)]);
-
-        // Insert new assignments for all users
-        const insertAssignmentQuery = `
-          INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
-          VALUES (?, ?, ?, NOW(), 'assigned', ?)
-        `;
-        
-        for (const user of usersResult) {
-          await executeQuery(insertAssignmentQuery, [
-            customer_id,
-            user.customer_id,
-            user.customer_id,
-            salesmanDetails.route
-          ]);
-        }
-      }
-    }
-
-    return result.affectedRows > 0;
-  } catch (error) {
-    console.error("Error in updateSalesman:", error);
-    throw new Error("Salesman update failed: " + error.message);
-  }
-};
 
 module.exports = {
   isUserExists,
@@ -1419,6 +1214,4 @@ module.exports = {
   insertDefaultOrder,
   resetPassword,
   getAdminAssignments,
-  addSalesman,
-  updateSalesman
 };
