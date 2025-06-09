@@ -9,6 +9,8 @@ const generalRouter = require('./routes/generalRoutes');
 const worldline = require('./routes/worldline');
 const adminAssignRoutes = require('./routes/adminassign');
 const action = require('./routes/action');
+const action_2 = require('./routes/action_2');
+const action_3 = require('./routes/action_3');
 const path = require('path');
 
 const app = express();
@@ -65,6 +67,8 @@ app.use('/', adminRouter);
 app.use('/', generalRouter);
 app.use('/', adminAssignRoutes);
 app.use('/', action);
+app.use('/', action_2);
+app.use('/', action_3);
 app.use('/', worldline);
 
 

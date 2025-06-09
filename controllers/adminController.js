@@ -151,7 +151,8 @@ exports.addProductController = async (req, res) => {
       cost_price,
       auom,
       uom_qty,
-      auom_qty
+      auom_qty,
+      offers
     } = req.body;
 
     // Validate required fields
@@ -186,7 +187,8 @@ exports.addProductController = async (req, res) => {
       cost_price: cost_price || 0,
       auom: auom || null,
       uom_qty: uom_qty || null,
-      auom_qty: auom_qty || null
+      auom_qty: auom_qty || null,
+      offers: offers || null
     };
 
     const addResponse = await adminService.addProductService(productData);
