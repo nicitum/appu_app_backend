@@ -416,6 +416,7 @@ const addUser = async (userDetails) => {
         route,
         email,
         phone,
+        price_mode,
         delivery_address,
         gst_number,
         address_line1,
@@ -430,7 +431,7 @@ const addUser = async (userDetails) => {
         created_at, 
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', UNIX_TIMESTAMP(), UNIX_TIMESTAMP())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', UNIX_TIMESTAMP(), UNIX_TIMESTAMP())
     `;
 
     const values = [
@@ -442,6 +443,7 @@ const addUser = async (userDetails) => {
       userDetails.route,
       userDetails.email,
       userDetails.phone,
+      userDetails.price_mode,
       userDetails.delivery_address,
       userDetails.gst_number,
       userDetails.address_line1,
@@ -604,6 +606,7 @@ const addProduct = async (productData) => {
         created_at, 
         updated_at, 
         hsn_code, 
+        hsn_desc,
         gst_rate,
         alias,
         part_number,
@@ -612,12 +615,15 @@ const addProduct = async (productData) => {
         maintain_batches,
         stock_quantity,
         cost_price,
+        min_selling_price,
+        incentive_percent,
+        incentive_value,
         auom,
         uom_qty,
         auom_qty,
         offers
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const values = [
@@ -631,6 +637,7 @@ const addProduct = async (productData) => {
       productData.created_at,
       productData.updated_at,
       productData.hsn_code,
+      productData.hsn_desc || null,
       productData.gst_rate,
       productData.alias,
       productData.part_number,
@@ -639,6 +646,9 @@ const addProduct = async (productData) => {
       productData.maintain_batches,
       productData.stock_quantity,
       productData.cost_price,
+      productData.min_selling_price || null,
+      productData.incentive_percent || null,
+      productData.incentive_value || null,
       productData.auom || null,
       productData.uom_qty || null,
       productData.auom_qty || null,
@@ -720,7 +730,8 @@ const updateUser = async (customer_id, userDetails) => {
       'city',
       'state',
       'zip_code',
-      'role'
+      'role',
+      'price_mode',
     ];
 
     // Add fields to update if they are provided
@@ -887,6 +898,15 @@ const updateProduct = async (id, updateFields) => {
     // Validate id
     if (!id) {
       throw new Error("Product ID is required");
+    }
+
+    // If price is missing, fetch the current price from the database
+    if (updateFields.price === undefined || updateFields.price === null) {
+      const currentProductArr = await getProductById(id);
+      if (!currentProductArr || currentProductArr.length === 0) {
+        throw new Error("Product not found");
+      }
+      updateFields.price = currentProductArr[0].price;
     }
 
     // Filter out undefined values and create clean update object

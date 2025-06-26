@@ -15,6 +15,14 @@ const {
 
 exports.addUserService = async (userDetails) => {
   try {
+    // Validate required fields including price_mode
+    if (!userDetails.price_mode) {
+      return {
+        statusCode: 400,
+        response: { status: false, message: "Price mode is required." },
+      };
+    }
+
     const existingUser = await isUserExists(userDetails.customer_id);
 
     if (existingUser) {

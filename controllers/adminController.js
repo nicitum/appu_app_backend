@@ -12,6 +12,7 @@ exports.addUserController = async (req, res) => {
       route,
       email,
       phone,
+      price_mode,
       delivery_address,
       gst_number,
       address_line1,
@@ -25,10 +26,10 @@ exports.addUserController = async (req, res) => {
     } = req.body;
 
     // Validate required fields
-    if (!customer_id || !username || !name || !password || !route || !email) {
+    if (!customer_id || !username || !name || !password || !route || !email || !price_mode) {
       return res.status(400).json({
         status: false,
-        message: "Required fields: customer_id, username, name, password, route, and email.",
+        message: "Required fields: customer_id, username, name, password, route, email, and price_mode.",
       });
     }
 
@@ -53,6 +54,7 @@ exports.addUserController = async (req, res) => {
       route,
       email,
       phone: phone || null,
+      price_mode,
       delivery_address: delivery_address || null,
       gst_number: gst_number || null,
       address_line1: address_line1 || null,
@@ -141,6 +143,7 @@ exports.addProductController = async (req, res) => {
       discountPrice, 
       uom,
       hsn_code, 
+      hsn_desc,
       gst_rate,
       alias,
       part_number,
@@ -149,6 +152,9 @@ exports.addProductController = async (req, res) => {
       maintain_batches,
       stock_quantity,
       cost_price,
+      min_selling_price,
+      incentive_percent,
+      incentive_value,
       auom,
       uom_qty,
       auom_qty,
@@ -177,6 +183,7 @@ exports.addProductController = async (req, res) => {
       created_at: Math.floor(Date.now() / 1000),
       updated_at: Math.floor(Date.now() / 1000),
       hsn_code: hsn_code || "",
+      hsn_desc: hsn_desc || null,
       gst_rate: gst_rate || 0,
       alias: alias || null,
       part_number: part_number || null,
@@ -185,6 +192,9 @@ exports.addProductController = async (req, res) => {
       maintain_batches: maintain_batches || 0,
       stock_quantity: stock_quantity || 0,
       cost_price: cost_price || 0,
+      min_selling_price: min_selling_price || null,
+      incentive_percent: incentive_percent || null,
+      incentive_value: incentive_value || null,
       auom: auom || null,
       uom_qty: uom_qty || null,
       auom_qty: auom_qty || null,

@@ -3,9 +3,38 @@ const router = express.Router();
 const { executeQuery } = require("../dbUtils/db");
 const fs = require('fs');
 const moment = require("moment-timezone"); 
+const path = require("path");
+const { exec } = require('child_process');
 
+// Utility function to recursively calculate folder size
+async function getFolderSize(dirPath) {
+  let total = 0;
+  const files = await fs.promises.readdir(dirPath, { withFileTypes: true });
+  for (const file of files) {
+    const fullPath = path.join(dirPath, file.name);
+    if (file.isDirectory()) {
+      total += await getFolderSize(fullPath);
+    } else if (file.isFile()) {
+      const stat = await fs.promises.stat(fullPath);
+      total += stat.size;
+    }
+  }
+  return total;
+}
 
-
+function humanFileSize(bytes) {
+  const thresh = 1024;
+  if (Math.abs(bytes) < thresh) {
+    return bytes + ' B';
+  }
+  const units = ['KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+  let u = -1;
+  do {
+    bytes /= thresh;
+    ++u;
+  } while (Math.abs(bytes) >= thresh && u < units.length - 1);
+  return bytes.toFixed(2) + ' ' + units[u];
+}
 
 router.post('/collect_online', async (req, res) => {
     try {
@@ -1928,6 +1957,38 @@ router.post("/stockgroup-crud", async (req, res) => {
             error: error.message
         });
     }
+});
+
+// API endpoint to get total oms1 folder size
+router.get("/server-folder-size", (req, res) => {
+  const oms1Path = path.join(__dirname, '..', '..');
+  exec(`du -sb "${oms1Path}"`, (error, stdout, stderr) => {
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to calculate folder size',
+        error: error.message
+      });
+    }
+    const sizeBytes = parseInt(stdout.split('\t')[0], 10);
+    // Convert to human readable
+    function humanFileSize(bytes) {
+      const thresh = 1024;
+      if (Math.abs(bytes) < thresh) return bytes + ' B';
+      const units = ['KB', 'MB', 'GB', 'TB'];
+      let u = -1;
+      do {
+        bytes /= thresh;
+        ++u;
+      } while (Math.abs(bytes) >= thresh && u < units.length - 1);
+      return bytes.toFixed(2) + ' ' + units[u];
+    }
+    res.json({
+      success: true,
+      size_bytes: sizeBytes,
+      size: humanFileSize(sizeBytes)
+    });
+  });
 });
 
 module.exports = router;

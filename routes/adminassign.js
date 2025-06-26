@@ -178,14 +178,8 @@ router.get("/assigned-users/:adminId", async (req, res) => {
   try {
     const fetchQuery = `
       SELECT DISTINCT
-        u.id, 
-        u.username, 
-        u.phone, 
-        u.customer_id AS cust_id, 
-        u.name, 
-        u.route, 
-        u.status, 
-        u.delivery_address
+        u.*, 
+        u.customer_id AS cust_id
       FROM users u
       INNER JOIN admin_assign aa 
         ON (u.id = aa.customer_id OR u.customer_id = aa.customer_id)

@@ -11,6 +11,7 @@ const adminAssignRoutes = require('./routes/adminassign');
 const action = require('./routes/action');
 const action_2 = require('./routes/action_2');
 const action_3 = require('./routes/action_3');
+const action_4 = require('./routes/action_4');
 const path = require('path');
 
 const app = express();
@@ -69,6 +70,7 @@ app.use('/', adminAssignRoutes);
 app.use('/', action);
 app.use('/', action_2);
 app.use('/', action_3);
+app.use('/', action_4);
 app.use('/', worldline);
 
 

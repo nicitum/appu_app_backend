@@ -451,7 +451,7 @@ router.post("/update-block-status", async (req, res) => {
 router.post("/salesman-create", async (req, res) => {
     try {
         // Only username and customer_id are mandatory
-        const requiredFields = ['customer_id', 'username'];
+        const requiredFields = ['customer_id', 'username', 'sub_role'];
         
         for (const field of requiredFields) {
             if (!req.body[field]) {
@@ -504,11 +504,13 @@ router.post("/salesman-create", async (req, res) => {
                 dl_number,
                 notes,
                 role,
+                sub_role,
                 password,
                 created_at, 
-                updated_at
+                updated_at,
+                allow_product_edit
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admin', ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP())
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admin', ?, ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP(), ?)
         `;
 
         const values = [
@@ -523,7 +525,9 @@ router.post("/salesman-create", async (req, res) => {
             req.body.pan_number || null,
             req.body.dl_number || null,
             req.body.notes || null,
-            hashedPassword
+            req.body.sub_role,
+            hashedPassword,
+            req.body.allow_product_edit || null
         ];
 
         await executeQuery(query, values);
@@ -591,7 +595,7 @@ router.post("/salesman-create", async (req, res) => {
 // Update salesman data
 router.post("/salesman-update", async (req, res) => {
     try {
-        const { customer_id, ...updateData } = req.body;
+        const { customer_id, sub_role, ...updateData } = req.body;
 
         if (!customer_id) {
             return res.status(400).json({
@@ -599,6 +603,13 @@ router.post("/salesman-update", async (req, res) => {
                 message: "Customer ID is required"
             });
         }
+        if (!sub_role) {
+            return res.status(400).json({
+                success: false,
+                message: "sub_role is required"
+            });
+        }
+        updateData.sub_role = sub_role;
 
         if (Object.keys(updateData).length === 0) {
             return res.status(400).json({
@@ -646,7 +657,9 @@ router.post("/salesman-update", async (req, res) => {
             'aadhar_number',
             'pan_number',
             'dl_number',
-            'notes'
+            'notes',
+            'sub_role',
+            'allow_product_edit'
         ];
 
         // Add fields to update if they are provided
@@ -755,8 +768,7 @@ router.get("/salesman-read", async (req, res) => {
         const { customer_id } = req.query;
         
         let readQuery = `
-            SELECT customer_id, username, phone, address_line1, designation,route,image,
-                   aadhar_number, pan_number, dl_number, notes
+            SELECT *
             FROM users
             WHERE role = 'admin'
         `;
@@ -1129,15 +1141,17 @@ router.post('/upload/advertisement-image/:adId', uploadAdvertisement.single('ima
     const getOldImageQuery = 'SELECT image FROM advertisements WHERE id = ?';
     const oldImageResult = await executeQuery(getOldImageQuery, [adId]);
     
-    // If there's an old image and it's different from the new one, delete it
-    if (oldImageResult.length > 0 && oldImageResult[0].image && oldImageResult[0].image !== req.file.filename) {
+    // If there's an old image, delete it before uploading new one
+    if (oldImageResult.length > 0 && oldImageResult[0].image) {
       const oldImagePath = path.join(__dirname, '..', 'uploads', 'adv', oldImageResult[0].image);
       try {
         if (fs.existsSync(oldImagePath)) {
+          console.log(`Deleting old image: ${oldImagePath}`);
           await fs.promises.unlink(oldImagePath);
+          console.log('Old image deleted successfully');
         }
       } catch (deleteError) {
-        // Ignore error, continue
+        console.error('Error deleting old image:', deleteError);
       }
     }
 
@@ -1358,6 +1372,167 @@ router.post("/advertisement-crud", async (req, res) => {
       }
     } catch (error) {
       console.error("Error in advertisement CRUD operation:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Internal server error",
+        error: error.message
+      });
+    }
+  });
+
+// Single API endpoint for HSN CRUD operations
+router.post("/hsn-crud", async (req, res) => {
+    try {
+        // Always destructure description from req.body
+        const { operation, id, code, length, description } = req.body;
+  
+      // Validate operation type
+      if (!operation || !['create', 'read', 'update', 'delete'].includes(operation.toLowerCase())) {
+        return res.status(400).json({
+          success: false,
+          message: "Valid operation (create/read/update/delete) is required"
+        });
+      }
+  
+      switch (operation.toLowerCase()) {
+        case 'create':
+          // Validate input for create
+          if (!code) {
+            return res.status(400).json({
+              success: false,
+              message: "Code is required"
+            });
+          }
+  
+          // Check if HSN code already exists
+          const checkExistingQuery = "SELECT * FROM hsn_masters WHERE code = ?";
+          const existingResult = await executeQuery(checkExistingQuery, [code]);
+  
+          if (existingResult.length > 0) {
+            return res.status(400).json({
+              success: false,
+              message: "HSN code already exists"
+            });
+          }
+  
+          // Create new HSN entry
+          const createQuery = "INSERT INTO hsn_masters (code, length, description) VALUES (?, ?, ?)";
+          const createResult = await executeQuery(createQuery, [code, length || null, description || null]);
+  
+          return res.status(200).json({
+            success: true,
+            message: "HSN created successfully",
+            data: {
+              id: createResult.insertId,
+              code,
+              length: length || null,
+              description: description || null
+            }
+          });
+  
+        case 'update':
+          // Validate input for update
+          if (!id || !code) {
+            return res.status(400).json({
+              success: false,
+              message: "ID and code are required for update"
+            });
+          }
+  
+          // Check if HSN exists
+          const checkQuery = "SELECT id FROM hsn_masters WHERE id = ?";
+          const checkResult = await executeQuery(checkQuery, [id]);
+  
+          if (checkResult.length === 0) {
+            return res.status(404).json({
+              success: false,
+              message: "HSN not found"
+            });
+          }
+  
+          // Check if new code already exists for different ID
+          const checkCodeQuery = "SELECT id FROM hsn_masters WHERE code = ? AND id != ?";
+          const codeExists = await executeQuery(checkCodeQuery, [code, id]);
+  
+          if (codeExists.length > 0) {
+            return res.status(400).json({
+              success: false,
+              message: "HSN code already exists for another entry"
+            });
+          }
+  
+          // Update HSN
+          const updateQuery = "UPDATE hsn_masters SET code = ?, length = ?, description = ? WHERE id = ?";
+          await executeQuery(updateQuery, [code, length || null, description || null, id]);
+  
+          return res.status(200).json({
+            success: true,
+            message: "HSN updated successfully",
+            data: {
+              id,
+              code,
+              length: length || null,
+              description: description || null
+            }
+          });
+  
+        case 'read':
+          // Read all HSN entries or specific HSN entry
+          let readQuery = "SELECT * FROM hsn_masters";
+          let readParams = [];
+  
+          if (id) {
+            readQuery += " WHERE id = ?";
+            readParams.push(id);
+          }
+  
+          readQuery += " ORDER BY id DESC";
+          const hsnEntries = await executeQuery(readQuery, readParams);
+  
+          if (id && hsnEntries.length === 0) {
+            return res.status(404).json({
+              success: false,
+              message: "HSN not found"
+            });
+          }
+  
+          return res.status(200).json({
+            success: true,
+            message: "HSN entry(s) fetched successfully",
+            data: hsnEntries
+          });
+  
+        case 'delete':
+          // Validate input for delete
+          if (!id) {
+            return res.status(400).json({
+              success: false,
+              message: "HSN ID is required for deletion"
+            });
+          }
+  
+          // Check if HSN exists
+          const getHsnQuery = "SELECT id FROM hsn_masters WHERE id = ?";
+          const hsnExists = await executeQuery(getHsnQuery, [id]);
+  
+          if (hsnExists.length === 0) {
+            return res.status(404).json({
+              success: false,
+              message: "HSN not found"
+            });
+          }
+  
+          // Delete the HSN record
+          const deleteQuery = "DELETE FROM hsn_masters WHERE id = ?";
+          await executeQuery(deleteQuery, [id]);
+  
+          return res.status(200).json({
+            success: true,
+            message: "HSN deleted successfully"
+          });
+      }
+    } catch (error) {
+      console.error("Error in HSN CRUD operation:", error);
       return res.status(500).json({
         success: false,
         message: "Internal server error",

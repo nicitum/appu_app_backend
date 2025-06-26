@@ -48,7 +48,7 @@ router.post("/update-delivery-status", async (req, res) => {
             return res.status(400).json({ status: false, message: "Customer ID, order ID, and delivery status are required" }); // **Updated message**
         }
 
-        if (!["pending", "delivered","out for delivery","processing"].includes(delivery_status.toLowerCase())) {
+        if (!["pending", "delivered","out for delivery","processing",'objection'].includes(delivery_status.toLowerCase())) {
             return res.status(400).json({ status: false, message: "Invalid delivery status" });
         }
 
@@ -573,12 +573,33 @@ router.post("/add-product-to-order", async (req, res) => {
             }
         }
 
+        // --- Use customer_product_prices if available ---
+        let priceToUse = price;
+        const customPriceResult = await executeQuery(
+            'SELECT customer_price FROM customer_product_prices WHERE customer_id = ? AND product_id = ?',
+            [req.body.customer_id, productId]
+        );
+        if (customPriceResult.length > 0) {
+            priceToUse = customPriceResult[0].customer_price;
+        }
         // --- Insert new order_product record ---
         const insertQuery = `
             INSERT INTO order_products (order_id, product_id, quantity, price, name, category, gst_rate)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         `;
-        const insertResult = await executeQuery(insertQuery, [orderId, productId, quantity, price, name, category, finalGstRate]);
+        const insertResult = await executeQuery(insertQuery, [orderId, productId, quantity, priceToUse, name, category, finalGstRate]);
+
+        // --- Update total_amount in orders table ---
+        const updateOrderTotalQuery = `
+            UPDATE orders
+            SET total_amount = (
+                SELECT COALESCE(SUM(quantity * price), 0)
+                FROM order_products
+                WHERE order_id = ?
+            )
+            WHERE id = ?
+        `;
+        await executeQuery(updateOrderTotalQuery, [orderId, orderId]);
 
         if (insertResult.affectedRows > 0) {
             console.log(`Product ID ${productId} added to order ID ${orderId} with GST rate ${finalGstRate}`);
@@ -1224,5 +1245,85 @@ router.get('/get_customer_credit_summaries', async (req, res) => { // Renamed en
     }
 });
 
+router.post("/on-behalf-2", async (req, res) => {
+    try {
+        const { customer_id, order_type, products } = req.body;
+
+        if (!customer_id || !order_type || !Array.isArray(products) || products.length === 0) {
+            return res.status(400).json({
+                message: "customer_id, order_type, and products[] are required"
+            });
+        }
+
+        if (order_type !== 'AM' && order_type !== 'PM') {
+            return res.status(400).json({ message: "Invalid order_type. Must be 'AM' or 'PM'." });
+        }
+
+        // 1. Create the order
+        const insertOrderQuery = `
+            INSERT INTO orders (customer_id, total_amount, order_type, placed_on, created_at, updated_at)
+            VALUES (?, 0.0, ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP(), UNIX_TIMESTAMP())
+        `;
+        const orderValues = [customer_id, order_type];
+        const insertOrderResult = await executeQuery(insertOrderQuery, orderValues);
+        const newOrderId = insertOrderResult.insertId;
+
+        if (!newOrderId) {
+            return res.status(500).json({ message: "Failed to create new order." });
+        }
+
+        // 2. Insert products
+        const productValues = products.map(p => [
+            newOrderId,
+            p.product_id,
+            p.quantity,
+            p.price,
+            p.name || '',
+            p.category || '',
+            p.gst_rate || 0
+        ]);
+        if (!productValues.length) {
+            return res.status(400).json({ message: "No products to insert." });
+        }
+        console.log('Inserting products:', productValues);
+
+        // Build placeholders for each product
+        const placeholders = productValues.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
+        // Flatten the productValues array
+        const flattenedValues = productValues.flat();
+
+        const insertProductQuery = `
+            INSERT INTO order_products (order_id, product_id, quantity, price, name, category, gst_rate)
+            VALUES ${placeholders}
+        `;
+
+        await executeQuery(insertProductQuery, flattenedValues);
+
+        // 3. Update total_amount
+        const updateOrderTotalQuery = `
+            UPDATE orders
+            SET total_amount = (
+                SELECT COALESCE(SUM(quantity * price), 0)
+                FROM order_products
+                WHERE order_id = ?
+            )
+            WHERE id = ?
+        `;
+        await executeQuery(updateOrderTotalQuery, [newOrderId, newOrderId]);
+
+        return res.status(201).json({
+            message: "Admin custom order placed successfully.",
+            new_order_id: newOrderId,
+            product_count: products.length
+        });
+
+    } catch (error) {
+        console.error("Error placing admin custom order:", error);
+        return res.status(500).json({
+            message: "Internal server error",
+            error: error.message
+        });
+    }
+});
 module.exports = router;
 
