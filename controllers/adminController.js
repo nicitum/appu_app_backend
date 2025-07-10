@@ -162,7 +162,7 @@ exports.addProductController = async (req, res) => {
     } = req.body;
 
     // Validate required fields
-    if (!name || !category || !price || !brand) {
+    if (!name || name.trim() === '' || !category || !price || !brand) {
       return res.status(400).json({
         status: "error",
         message: "Required fields: name, category, price, and brand.",

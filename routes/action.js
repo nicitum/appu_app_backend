@@ -508,9 +508,13 @@ router.post("/salesman-create", async (req, res) => {
                 password,
                 created_at, 
                 updated_at,
-                allow_product_edit
+                allow_product_edit,
+                allow_place_order,
+                allow_invoicing,
+                allow_invoice_display,
+                allo_edit_order
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admin', ?, ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP(), ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admin', ?, ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP(), ?, ?, ?, ?, ?)
         `;
 
         const values = [
@@ -527,7 +531,11 @@ router.post("/salesman-create", async (req, res) => {
             req.body.notes || null,
             req.body.sub_role,
             hashedPassword,
-            req.body.allow_product_edit || null
+            req.body.allow_product_edit || null,
+            req.body.allow_place_order || null,
+            req.body.allow_invoicing || null,
+            req.body.allow_invoice_display || null,
+            req.body.allow_edit_order || null
         ];
 
         await executeQuery(query, values);
@@ -542,18 +550,23 @@ router.post("/salesman-create", async (req, res) => {
         // Assign users for each route
         if (routeString) {
             const routes = routeString.split(',').map(r => r.trim());
+            console.log('Routes to assign:', routes);
+            
             for (const route of routes) {
-            const findUsersQuery = `
-                SELECT customer_id FROM users 
-                WHERE route = ? AND role != 'admin'
-            `;
-                const usersResult = await executeQuery(findUsersQuery, [route]);
-            if (usersResult.length > 0) {
-                const insertAssignmentQuery = `
-                    INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
-                    VALUES (?, ?, ?, NOW(), 'assigned', ?)
+                console.log(`Processing route: ${route}`);
+                const findUsersQuery = `
+                    SELECT customer_id FROM users 
+                    WHERE route = ? AND role != 'admin'
                 `;
-                for (const user of usersResult) {
+                const usersResult = await executeQuery(findUsersQuery, [route]);
+                console.log(`Found ${usersResult.length} users for route ${route}:`, usersResult);
+                
+                if (usersResult.length > 0) {
+                    const insertAssignmentQuery = `
+                        INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
+                        VALUES (?, ?, ?, NOW(), 'assigned', ?)
+                    `;
+                    for (const user of usersResult) {
                         // Check for existing assignment
                         const checkAssignmentQuery = `
                             SELECT 1 FROM admin_assign
@@ -565,12 +578,15 @@ router.post("/salesman-create", async (req, res) => {
                             route
                         ]);
                         if (exists.length === 0) {
-                    await executeQuery(insertAssignmentQuery, [
+                            console.log(`Assigning user ${user.customer_id} to salesman ${salesmanId} for route ${route}`);
+                            await executeQuery(insertAssignmentQuery, [
                                 salesmanId,
-                        user.customer_id,
-                        user.customer_id,
+                                user.customer_id,
+                                user.customer_id,
                                 route
-                    ]);
+                            ]);
+                        } else {
+                            console.log(`User ${user.customer_id} already assigned to salesman ${salesmanId} for route ${route}`);
                         }
                     }
                 }
@@ -659,7 +675,11 @@ router.post("/salesman-update", async (req, res) => {
             'dl_number',
             'notes',
             'sub_role',
-            'allow_product_edit'
+            'allow_product_edit',
+            'allow_place_order',
+            'allow_invoicing',
+            'allow_invoice_display',
+            'allow_edit_order'
         ];
 
         // Add fields to update if they are provided
@@ -699,6 +719,7 @@ router.post("/salesman-update", async (req, res) => {
         // Assign users for each route
         if (routeString !== undefined) {
             const routes = routeString.split(',').map(r => r.trim());
+            console.log('Routes in update:', routes);
 
             // 1. Delete assignments for this salesman that are NOT in the new routes
             if (routes.length > 0) {
@@ -706,25 +727,32 @@ router.post("/salesman-update", async (req, res) => {
                     DELETE FROM admin_assign
                     WHERE admin_id = ? AND route NOT IN (${routes.map(() => '?').join(',')})
                 `;
-                await executeQuery(deleteQuery, [salesmanId, ...routes]);
+                console.log(`Deleting assignments for salesman ${salesmanId} not in routes:`, routes);
+                const deleteResult = await executeQuery(deleteQuery, [salesmanId, ...routes]);
+                console.log(`Deleted ${deleteResult.affectedRows} old assignments`);
             } else {
                 // If no routes, remove all assignments for this salesman
-                await executeQuery('DELETE FROM admin_assign WHERE admin_id = ?', [salesmanId]);
+                console.log(`No routes provided, removing all assignments for salesman ${salesmanId}`);
+                const deleteResult = await executeQuery('DELETE FROM admin_assign WHERE admin_id = ?', [salesmanId]);
+                console.log(`Deleted ${deleteResult.affectedRows} assignments`);
             }
 
             // Now assign users for each route (avoiding duplicates)
             for (const route of routes) {
-            const findUsersQuery = `
-                SELECT customer_id FROM users 
-                WHERE route = ? AND role != 'admin'
-            `;
-                const usersResult = await executeQuery(findUsersQuery, [route]);
-            if (usersResult.length > 0) {
-                const insertAssignmentQuery = `
-                    INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
-                    VALUES (?, ?, ?, NOW(), 'assigned', ?)
+                console.log(`Processing route in update: ${route}`);
+                const findUsersQuery = `
+                    SELECT customer_id FROM users 
+                    WHERE route = ? AND role != 'admin'
                 `;
-                for (const user of usersResult) {
+                const usersResult = await executeQuery(findUsersQuery, [route]);
+                console.log(`Found ${usersResult.length} users for route ${route} in update:`, usersResult);
+                
+                if (usersResult.length > 0) {
+                    const insertAssignmentQuery = `
+                        INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
+                        VALUES (?, ?, ?, NOW(), 'assigned', ?)
+                    `;
+                    for (const user of usersResult) {
                         // Check for existing assignment
                         const checkAssignmentQuery = `
                             SELECT 1 FROM admin_assign
@@ -736,12 +764,15 @@ router.post("/salesman-update", async (req, res) => {
                             route
                         ]);
                         if (exists.length === 0) {
-                    await executeQuery(insertAssignmentQuery, [
+                            console.log(`Assigning user ${user.customer_id} to salesman ${salesmanId} for route ${route} in update`);
+                            await executeQuery(insertAssignmentQuery, [
                                 salesmanId,
-                        user.customer_id,
-                        user.customer_id,
+                                user.customer_id,
+                                user.customer_id,
                                 route
-                    ]);
+                            ]);
+                        } else {
+                            console.log(`User ${user.customer_id} already assigned to salesman ${salesmanId} for route ${route} in update`);
                         }
                     }
                 }

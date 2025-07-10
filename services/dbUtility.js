@@ -36,7 +36,7 @@ const findUserByPhone = async (phone) => {
 const getUserById = async (customerId) => {
   try {
     const userQuery =
-      "SELECT customer_id, name, username, phone, delivery_address, route,auto_am_order,auto_pm_order FROM users WHERE customer_id = ?";
+      "SELECT * FROM users WHERE customer_id = ?";
     const [user] = await executeQuery(userQuery, [customerId]);
 
     const latestOrderQuery = `SELECT 
@@ -623,7 +623,7 @@ const addProduct = async (productData) => {
         auom_qty,
         offers
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const values = [
@@ -1120,6 +1120,7 @@ const updateOrderTotal = async (orderId) => {
     };
   }
 };
+
 const insertDefaultOrder = async (
   customerId,
   id,
@@ -1197,7 +1198,6 @@ const getAdminAssignments = async (customerId) => {
     throw new Error("Failed to get admin assignments: " + error.message);
   }
 };
-
 
 module.exports = {
   isUserExists,

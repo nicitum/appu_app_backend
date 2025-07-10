@@ -630,55 +630,18 @@ router.post("/on-behalf", async (req, res) => {
             });
         }
 
-        // Validate order_type is exactly 'AM' or 'PM'
-        if (order_type !== 'AM' && order_type !== 'PM') {
-            return res.status(400).json({ message: "Invalid order_type. Must be 'AM' or 'PM'." });
+        // Automatically determine order type based on current time
+        const currentHour = new Date().getHours();
+        
+        if (currentHour >= 0 && currentHour < 12) {
+            req.body.order_type = 'PM';
+        } else {
+            req.body.order_type = 'AM';
         }
 
-        // 0. Check if an order already exists for the customer and order_type today
-        const checkExistingOrderQuery = `
-            SELECT id
-            FROM orders
-            WHERE customer_id = ?
-            AND order_type = ?
-            AND DATE(FROM_UNIXTIME(placed_on)) = CURDATE()
-            LIMIT 1
-        `;
-        const existingOrderResult = await executeQuery(checkExistingOrderQuery, [customer_id, order_type]);
 
-        if (existingOrderResult && existingOrderResult.length > 0) {
-            return res.status(400).json({
-                message: `Order already placed for ${order_type} today.`
-            });
-        }
 
-        // 1. Check if auto order is enabled for the user and order type
-        const checkAutoOrderQuery = `
-            SELECT auto_am_order, auto_pm_order
-            FROM users
-            WHERE customer_id = ?
-        `;
-        const userCheckResult = await executeQuery(checkAutoOrderQuery, [customer_id]);
 
-        if (!userCheckResult || userCheckResult.length === 0) {
-            return res.status(404).json({ message: "Customer not found." });
-        }
-
-        const user = userCheckResult[0];
-
-        if (order_type === 'AM') {
-            if (user.auto_am_order && user.auto_am_order.toLowerCase() === 'yes') {
-                // Proceed
-            } else {
-                return res.status(400).json({ message: "Automatic AM order placement is disabled for this customer." });
-            }
-        } else if (order_type === 'PM') {
-            if (user.auto_pm_order && user.auto_pm_order.toLowerCase() === 'yes') {
-                // Proceed
-            } else {
-                return res.status(400).json({ message: "Automatic PM order placement is disabled for this customer." });
-            }
-        }
 
         // 2. Validate reference_order_id exists and has products
         const checkReferenceOrderQuery = `
@@ -696,11 +659,6 @@ router.post("/on-behalf", async (req, res) => {
             SELECT product_id, quantity, price, name, category,gst_rate
             FROM order_products
             WHERE order_id = ?
-            AND LOWER(category) NOT LIKE '%others%'
-            AND LOWER(category) NOT LIKE '%paneer%'
-            AND LOWER(category) NOT LIKE '%ghee%'
-            AND LOWER(category) NOT LIKE '%butter%'
-            AND LOWER(category) NOT LIKE '%butter milk%'
         `;
         const referenceProducts = await executeQuery(checkReferenceProductsQuery, [reference_order_id]);
         console.log(`Reference order ${reference_order_id} products for ${order_type}:`, referenceProducts);
@@ -730,11 +688,6 @@ router.post("/on-behalf", async (req, res) => {
             SELECT ?, product_id, quantity, price, name, category,gst_rate
             FROM order_products
             WHERE order_id = ?
-            AND LOWER(category) NOT LIKE '%others%'
-            AND LOWER(category) NOT LIKE '%paneer%'
-            AND LOWER(category) NOT LIKE '%ghee%'
-            AND LOWER(category) NOT LIKE '%butter%'
-            AND LOWER(category) NOT LIKE '%butter milk%'
         `;
         const orderProductsValues = [newOrderId, reference_order_id];
         const insertProductsResult = await executeQuery(insertOrderProductsQuery, orderProductsValues);
