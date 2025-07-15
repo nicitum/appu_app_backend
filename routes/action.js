@@ -279,28 +279,6 @@ router.get('/images/brands/:filename', (req, res) => {
 });
 
 
-// Salesman Management Routes
-router.post("/add-salesman", async (req, res) => {
-  try {
-        // Convert comma-separated routes to JSON array before passing to service
-        if (req.body.route) {
-            const routes = req.body.route.split(',').map(r => r.trim());
-            req.body.route = JSON.stringify(routes);
-        }
-
-    const result = await adminService.addSalesmanService(req.body);
-    return res.status(result.statusCode).json(result.response);
-  } catch (error) {
-    console.error("Error in add-salesman route:", error);
-    return res.status(500).json({
-      status: false,
-      message: "Failed to add salesman: " + error.message
-    });
-  }
-});
-
-
-
 // Get all admin users (sales managers)
 router.get("/salesman-fetch", async (req, res) => {
     try {
@@ -462,6 +440,44 @@ router.post("/salesman-create", async (req, res) => {
             }
         }
 
+        // Duplicate checks for username, name, phone (role = 'admin')
+        if (req.body.username) {
+            const existingUsername = await executeQuery(
+                "SELECT 1 FROM users WHERE username = ? AND role = 'admin'",
+                [req.body.username]
+            );
+            if (existingUsername.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Username already exists"
+                });
+            }
+        }
+        if (req.body.name) {
+            const existingName = await executeQuery(
+                "SELECT 1 FROM users WHERE name = ? AND role = 'admin'",
+                [req.body.name]
+            );
+            if (existingName.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Name already exists"
+                });
+            }
+        }
+        if (req.body.phone) {
+            const existingPhone = await executeQuery(
+                "SELECT 1 FROM users WHERE phone = ? AND role = 'admin'",
+                [req.body.phone]
+            );
+            if (existingPhone.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Phone number already exists"
+                });
+            }
+        }
+
         // Check if salesman already exists
         const existingSalesman = await executeQuery(
             "SELECT * FROM users WHERE customer_id = ?",
@@ -512,7 +528,7 @@ router.post("/salesman-create", async (req, res) => {
                 allow_place_order,
                 allow_invoicing,
                 allow_invoice_display,
-                allo_edit_order
+                allow_edit_order
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admin', ?, ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP(), ?, ?, ?, ?, ?)
         `;
@@ -549,7 +565,7 @@ router.post("/salesman-create", async (req, res) => {
 
         // Assign users for each route
         if (routeString) {
-            const routes = routeString.split(',').map(r => r.trim());
+            const routes = routeString.split(','); // No trimming, use as-is
             console.log('Routes to assign:', routes);
             
             for (const route of routes) {
@@ -608,190 +624,246 @@ router.post("/salesman-create", async (req, res) => {
     }
 });
 
+
 // Update salesman data
 router.post("/salesman-update", async (req, res) => {
-    try {
-        const { customer_id, sub_role, ...updateData } = req.body;
+  try {
+      const { customer_id, sub_role, ...updateData } = req.body;
 
-        if (!customer_id) {
-            return res.status(400).json({
-                success: false,
-                message: "Customer ID is required"
-            });
-        }
-        if (!sub_role) {
-            return res.status(400).json({
-                success: false,
-                message: "sub_role is required"
-            });
-        }
-        updateData.sub_role = sub_role;
+      // Require phone, sub_role, and username for update
+      if (!customer_id) {
+          return res.status(400).json({
+              success: false,
+              message: "Customer ID is required"
+          });
+      }
+      if (!sub_role) {
+          return res.status(400).json({
+              success: false,
+              message: "sub_role is required"
+          });
+      }
+      if (!req.body.phone) {
+          return res.status(400).json({
+              success: false,
+              message: "phone is required"
+          });
+      }
+      if (!req.body.username) {
+          return res.status(400).json({
+              success: false,
+              message: "username is required"
+          });
+      }
+      updateData.sub_role = sub_role;
+      updateData.phone = req.body.phone;
+      updateData.username = req.body.username;
 
-        if (Object.keys(updateData).length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: "No fields to update"
-            });
-        }
+      if (Object.keys(updateData).length === 0) {
+          return res.status(400).json({
+              success: false,
+              message: "No fields to update"
+          });
+      }
 
-        // Store route as comma-separated string (not JSON)
-        let routeString = undefined;
-        if (updateData.route) {
-            if (Array.isArray(updateData.route)) {
-                routeString = updateData.route.join(",");
-            } else {
-                routeString = updateData.route;
-            }
-            updateData.route = routeString;
-        }
+      // Store route as comma-separated string (not JSON)
+      let routeString = undefined;
+      if (updateData.route) {
+          if (Array.isArray(updateData.route)) {
+              routeString = updateData.route.join(",");
+          } else {
+              routeString = updateData.route;
+          }
+          updateData.route = routeString;
+      }
 
-        // Check if salesman exists
-        const existingSalesman = await executeQuery(
-            "SELECT * FROM users WHERE customer_id = ? AND role = 'admin'",
-            [customer_id]
-        );
+      // Duplicate checks for username, name, phone (role = 'admin')
+      // Only check if the field is being updated
+      if (updateData.username) {
+          const existingUsername = await executeQuery(
+              "SELECT 1 FROM users WHERE username = ? AND role = 'admin' AND customer_id != ?",
+              [updateData.username, customer_id]
+          );
+          if (existingUsername.length > 0) {
+              return res.status(400).json({
+                  success: false,
+                  message: "Username already exists"
+              });
+          }
+      }
+      if (updateData.name) {
+          const existingName = await executeQuery(
+              "SELECT 1 FROM users WHERE name = ? AND role = 'admin' AND customer_id != ?",
+              [updateData.name, customer_id]
+          );
+          if (existingName.length > 0) {
+              return res.status(400).json({
+                  success: false,
+                  message: "Name already exists"
+              });
+          }
+      }
+      if (updateData.phone) {
+          const existingPhone = await executeQuery(
+              "SELECT 1 FROM users WHERE phone = ? AND role = 'admin' AND customer_id != ?",
+              [updateData.phone, customer_id]
+          );
+          if (existingPhone.length > 0) {
+              return res.status(400).json({
+                  success: false,
+                  message: "Phone number already exists"
+              });
+          }
+      }
 
-        if (existingSalesman.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Salesman not found"
-            });
-        }
+      // Check if salesman exists
+      const existingSalesman = await executeQuery(
+          "SELECT * FROM users WHERE customer_id = ? AND role = 'admin'",
+          [customer_id]
+      );
 
-        // Build update query dynamically based on provided fields
-        let updateFields = [];
-        let values = [];
+      if (existingSalesman.length === 0) {
+          return res.status(404).json({
+              success: false,
+              message: "Salesman not found"
+          });
+      }
 
-        // List of fields that can be updated
-        const allowedFields = [
-            'username',
-            'name',
-            'phone',
-            'address_line1',
-            'designation',
-            'route',
-            'aadhar_number',
-            'pan_number',
-            'dl_number',
-            'notes',
-            'sub_role',
-            'allow_product_edit',
-            'allow_place_order',
-            'allow_invoicing',
-            'allow_invoice_display',
-            'allow_edit_order'
-        ];
+      // Build update query dynamically based on provided fields
+      let updateFields = [];
+      let values = [];
 
-        // Add fields to update if they are provided
-        allowedFields.forEach(field => {
-            if (updateData[field] !== undefined) {
-                updateFields.push(`${field} = ?`);
-                values.push(updateData[field]);
-            }
-        });
+      // List of fields that can be updated
+      const allowedFields = [
+          'username',
+          'name',
+          'phone',
+          'address_line1',
+          'designation',
+          'route',
+          'aadhar_number',
+          'pan_number',
+          'dl_number',
+          'notes',
+          'sub_role',
+          'allow_product_edit',
+          'allow_place_order',
+          'allow_invoicing',
+          'allow_invoice_display',
+          'allow_edit_order'
+      ];
 
-        // Add updated_at timestamp
-        updateFields.push('updated_at = UNIX_TIMESTAMP()');
+      // Add fields to update if they are provided
+      allowedFields.forEach(field => {
+          if (updateData[field] !== undefined) {
+              updateFields.push(`${field} = ?`);
+              values.push(updateData[field]);
+          }
+      });
 
-        // Add customer_id to values array for WHERE clause
-        values.push(customer_id);
+      // Add updated_at timestamp
+      updateFields.push('updated_at = UNIX_TIMESTAMP()');
 
-        const query = `
-            UPDATE users 
-            SET ${updateFields.join(', ')}
-            WHERE customer_id = ? AND role = 'admin'
-        `;
+      // Add customer_id to values array for WHERE clause
+      values.push(customer_id);
 
-        if ((await executeQuery(query, values)).affectedRows === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Salesman not found or no changes made"
-            });
-        }
+      const query = `
+          UPDATE users 
+          SET ${updateFields.join(', ')}
+          WHERE customer_id = ? AND role = 'admin'
+      `;
 
-        // Fetch the salesman's id from users table
-        const salesmanRow = await executeQuery("SELECT id FROM users WHERE customer_id = ? AND role = 'admin'", [customer_id]);
-        if (!salesmanRow.length) {
-            return res.status(500).json({ success: false, message: "Failed to fetch salesman id after update" });
-        }
-        const salesmanId = salesmanRow[0].id;
+      if ((await executeQuery(query, values)).affectedRows === 0) {
+          return res.status(404).json({
+              success: false,
+              message: "Salesman not found or no changes made"
+          });
+      }
 
-        // Assign users for each route
-        if (routeString !== undefined) {
-            const routes = routeString.split(',').map(r => r.trim());
-            console.log('Routes in update:', routes);
+      // Fetch the salesman's id from users table
+      const salesmanRow = await executeQuery("SELECT id FROM users WHERE customer_id = ? AND role = 'admin'", [customer_id]);
+      if (!salesmanRow.length) {
+          return res.status(500).json({ success: false, message: "Failed to fetch salesman id after update" });
+      }
+      const salesmanId = salesmanRow[0].id;
 
-            // 1. Delete assignments for this salesman that are NOT in the new routes
-            if (routes.length > 0) {
-                const deleteQuery = `
-                    DELETE FROM admin_assign
-                    WHERE admin_id = ? AND route NOT IN (${routes.map(() => '?').join(',')})
-                `;
-                console.log(`Deleting assignments for salesman ${salesmanId} not in routes:`, routes);
-                const deleteResult = await executeQuery(deleteQuery, [salesmanId, ...routes]);
-                console.log(`Deleted ${deleteResult.affectedRows} old assignments`);
-            } else {
-                // If no routes, remove all assignments for this salesman
-                console.log(`No routes provided, removing all assignments for salesman ${salesmanId}`);
-                const deleteResult = await executeQuery('DELETE FROM admin_assign WHERE admin_id = ?', [salesmanId]);
-                console.log(`Deleted ${deleteResult.affectedRows} assignments`);
-            }
+      // Assign users for each route
+      if (routeString !== undefined) {
+          const routes = routeString.split(','); // No trimming, use as-is
+          console.log('Routes in update:', routes);
 
-            // Now assign users for each route (avoiding duplicates)
-            for (const route of routes) {
-                console.log(`Processing route in update: ${route}`);
-                const findUsersQuery = `
-                    SELECT customer_id FROM users 
-                    WHERE route = ? AND role != 'admin'
-                `;
-                const usersResult = await executeQuery(findUsersQuery, [route]);
-                console.log(`Found ${usersResult.length} users for route ${route} in update:`, usersResult);
-                
-                if (usersResult.length > 0) {
-                    const insertAssignmentQuery = `
-                        INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
-                        VALUES (?, ?, ?, NOW(), 'assigned', ?)
-                    `;
-                    for (const user of usersResult) {
-                        // Check for existing assignment
-                        const checkAssignmentQuery = `
-                            SELECT 1 FROM admin_assign
-                            WHERE admin_id = ? AND customer_id = ? AND route = ?
-                        `;
-                        const exists = await executeQuery(checkAssignmentQuery, [
-                            salesmanId,
-                            user.customer_id,
-                            route
-                        ]);
-                        if (exists.length === 0) {
-                            console.log(`Assigning user ${user.customer_id} to salesman ${salesmanId} for route ${route} in update`);
-                            await executeQuery(insertAssignmentQuery, [
-                                salesmanId,
-                                user.customer_id,
-                                user.customer_id,
-                                route
-                            ]);
-                        } else {
-                            console.log(`User ${user.customer_id} already assigned to salesman ${salesmanId} for route ${route} in update`);
-                        }
-                    }
-                }
-            }
-        }
+          // 1. Delete assignments for this salesman that are NOT in the new routes
+          if (routes.length > 0) {
+              const deleteQuery = `
+                  DELETE FROM admin_assign
+                  WHERE admin_id = ? AND route NOT IN (${routes.map(() => '?').join(',')})
+              `;
+              console.log(`Deleting assignments for salesman ${salesmanId} not in routes:`, routes);
+              const deleteResult = await executeQuery(deleteQuery, [salesmanId, ...routes]);
+              console.log(`Deleted ${deleteResult.affectedRows} old assignments`);
+          } else {
+              // If no routes, remove all assignments for this salesman
+              console.log(`No routes provided, removing all assignments for salesman ${salesmanId}`);
+              const deleteResult = await executeQuery('DELETE FROM admin_assign WHERE admin_id = ?', [salesmanId]);
+              console.log(`Deleted ${deleteResult.affectedRows} assignments`);
+          }
 
-        return res.status(200).json({
-            success: true,
-            message: "Salesman updated successfully"
-        });
-    } catch (error) {
-        console.error("Error updating salesman:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error",
-            error: error.message
-        });
-    }
+          // Now assign users for each route (avoiding duplicates)
+          for (const route of routes) {
+              console.log(`Processing route in update: ${route}`);
+              const findUsersQuery = `
+                  SELECT customer_id FROM users 
+                  WHERE route = ? AND role != 'admin'
+              `;
+              const usersResult = await executeQuery(findUsersQuery, [route]);
+              console.log(`Found ${usersResult.length} users for route ${route} in update:`, usersResult);
+              
+              if (usersResult.length > 0) {
+                  const insertAssignmentQuery = `
+                      INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route)
+                      VALUES (?, ?, ?, NOW(), 'assigned', ?)
+                  `;
+                  for (const user of usersResult) {
+                      // Check for existing assignment
+                      const checkAssignmentQuery = `
+                          SELECT 1 FROM admin_assign
+                          WHERE admin_id = ? AND customer_id = ? AND route = ?
+                      `;
+                      const exists = await executeQuery(checkAssignmentQuery, [
+                          salesmanId,
+                          user.customer_id,
+                          route
+                      ]);
+                      if (exists.length === 0) {
+                          console.log(`Assigning user ${user.customer_id} to salesman ${salesmanId} for route ${route} in update`);
+                          await executeQuery(insertAssignmentQuery, [
+                              salesmanId,
+                              user.customer_id,
+                              user.customer_id,
+                              route
+                          ]);
+                      } else {
+                          console.log(`User ${user.customer_id} already assigned to salesman ${salesmanId} for route ${route} in update`);
+                      }
+                  }
+              }
+          }
+      }
+
+      return res.status(200).json({
+          success: true,
+          message: "Salesman updated successfully"
+      });
+  } catch (error) {
+      console.error("Error updating salesman:", error);
+      return res.status(500).json({
+          success: false,
+          message: "Internal server error",
+          error: error.message
+      });
+  }
 });
+
 
 // Read salesman data
 router.get("/salesman-read", async (req, res) => {
@@ -1415,7 +1487,7 @@ router.post("/advertisement-crud", async (req, res) => {
 router.post("/hsn-crud", async (req, res) => {
     try {
         // Always destructure description from req.body
-        const { operation, id, code, length, description } = req.body;
+        const { operation, id, code, description } = req.body;
   
       // Validate operation type
       if (!operation || !['create', 'read', 'update', 'delete'].includes(operation.toLowerCase())) {
@@ -1434,29 +1506,28 @@ router.post("/hsn-crud", async (req, res) => {
               message: "Code is required"
             });
           }
-  
+
           // Check if HSN code already exists
           const checkExistingQuery = "SELECT * FROM hsn_masters WHERE code = ?";
           const existingResult = await executeQuery(checkExistingQuery, [code]);
-  
+
           if (existingResult.length > 0) {
             return res.status(400).json({
               success: false,
               message: "HSN code already exists"
             });
           }
-  
-          // Create new HSN entry
-          const createQuery = "INSERT INTO hsn_masters (code, length, description) VALUES (?, ?, ?)";
-          const createResult = await executeQuery(createQuery, [code, length || null, description || null]);
-  
+
+          // Create new HSN entry - use code as-is, do not truncate, and do not use length
+          const createQuery = "INSERT INTO hsn_masters (code, description) VALUES (?, ?)";
+          const createResult = await executeQuery(createQuery, [code, description || null]);
+
           return res.status(200).json({
             success: true,
             message: "HSN created successfully",
             data: {
               id: createResult.insertId,
-              code,
-              length: length || null,
+              code: code,
               description: description || null
             }
           });
@@ -1469,64 +1540,63 @@ router.post("/hsn-crud", async (req, res) => {
               message: "ID and code are required for update"
             });
           }
-  
+
           // Check if HSN exists
           const checkQuery = "SELECT id FROM hsn_masters WHERE id = ?";
           const checkResult = await executeQuery(checkQuery, [id]);
-  
+
           if (checkResult.length === 0) {
             return res.status(404).json({
               success: false,
               message: "HSN not found"
             });
           }
-  
+
           // Check if new code already exists for different ID
           const checkCodeQuery = "SELECT id FROM hsn_masters WHERE code = ? AND id != ?";
           const codeExists = await executeQuery(checkCodeQuery, [code, id]);
-  
+
           if (codeExists.length > 0) {
             return res.status(400).json({
               success: false,
               message: "HSN code already exists for another entry"
             });
           }
-  
-          // Update HSN
-          const updateQuery = "UPDATE hsn_masters SET code = ?, length = ?, description = ? WHERE id = ?";
-          await executeQuery(updateQuery, [code, length || null, description || null, id]);
-  
+
+          // Update HSN - use code as-is, do not use length
+          const updateQuery = "UPDATE hsn_masters SET code = ?, description = ? WHERE id = ?";
+          await executeQuery(updateQuery, [code, description || null, id]);
+
           return res.status(200).json({
             success: true,
             message: "HSN updated successfully",
             data: {
               id,
-              code,
-              length: length || null,
+              code: code,
               description: description || null
             }
           });
   
         case 'read':
           // Read all HSN entries or specific HSN entry
-          let readQuery = "SELECT * FROM hsn_masters";
+          let readQuery = "SELECT id, code, description FROM hsn_masters";
           let readParams = [];
-  
+
           if (id) {
             readQuery += " WHERE id = ?";
             readParams.push(id);
           }
-  
+
           readQuery += " ORDER BY id DESC";
           const hsnEntries = await executeQuery(readQuery, readParams);
-  
+
           if (id && hsnEntries.length === 0) {
             return res.status(404).json({
               success: false,
               message: "HSN not found"
             });
           }
-  
+
           return res.status(200).json({
             success: true,
             message: "HSN entry(s) fetched successfully",
@@ -1543,13 +1613,24 @@ router.post("/hsn-crud", async (req, res) => {
           }
   
           // Check if HSN exists
-          const getHsnQuery = "SELECT id FROM hsn_masters WHERE id = ?";
+          const getHsnQuery = "SELECT id, code FROM hsn_masters WHERE id = ?";
           const hsnExists = await executeQuery(getHsnQuery, [id]);
   
           if (hsnExists.length === 0) {
             return res.status(404).json({
               success: false,
               message: "HSN not found"
+            });
+          }
+
+          // Restrict deletion if any product uses this HSN code
+          const hsnCode = hsnExists[0].code;
+          const productCheckQuery = "SELECT 1 FROM products WHERE hsn_code = ? LIMIT 1";
+          const productUsingHsn = await executeQuery(productCheckQuery, [hsnCode]);
+          if (productUsingHsn.length > 0) {
+            return res.status(400).json({
+              success: false,
+              message: "Cannot delete: This HSN code is used by one or more products."
             });
           }
   

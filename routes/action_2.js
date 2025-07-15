@@ -478,24 +478,12 @@ router.post("/cancel_order/:orderId", async (req, res) => { // Changed to POST
             return res.status(400).json({ success: false, message: "Order ID is required" });
         }
 
-        // SQL query to DELETE from order_products table to remove product details
-        const cancelOrderProductsQuery = `
-            DELETE FROM order_products
-            WHERE order_id = ?
-        `;
-
-        // Execute the query to cancel order products (DELETE instead of UPDATE)
-        const cancelProductsResult = await executeQuery(cancelOrderProductsQuery, [orderId]);
-        console.log("Order Products Cancel Result:", cancelProductsResult);
-
-        // SQL query to update orders table to set total_amount to 0 and cancelled to 'Yes'
+        // SQL query to update orders table to set cancelled to 'Yes' (no deletion of products)
         const cancelOrdersTableQuery = `
             UPDATE orders
-            SET total_amount = 0.0,
-            cancelled = 'Yes'
+            SET cancelled = 'Yes'
             WHERE id = ?
         `;
-
 
         // Execute the query to cancel order in orders table
         const cancelOrdersResult = await executeQuery(cancelOrdersTableQuery, [orderId]);
@@ -525,7 +513,7 @@ router.post("/add-product-to-order", async (req, res) => {
         if (isNaN(orderId) || isNaN(productId) || isNaN(quantity) || isNaN(price) || quantity <= 0 || price < 0) {
             return res.status(400).json({ success: false, message: "Invalid data types: orderId and productId must be numbers, quantity must be a positive number, and price must be a non-negative number." });
         }
-        if (gst_rate === undefined || isNaN(gst_rate) || gst_rate < 0) {
+        if (gst_rate !== undefined && (isNaN(gst_rate) || gst_rate < 0)) {
             return res.status(400).json({ success: false, message: "Invalid GST rate: gst_rate must be a non-negative number." });
         }
 
@@ -575,19 +563,30 @@ router.post("/add-product-to-order", async (req, res) => {
 
         // --- Use customer_product_prices if available ---
         let priceToUse = price;
-        const customPriceResult = await executeQuery(
-            'SELECT customer_price FROM customer_product_prices WHERE customer_id = ? AND product_id = ?',
-            [req.body.customer_id, productId]
-        );
-        if (customPriceResult.length > 0) {
-            priceToUse = customPriceResult[0].customer_price;
+        if (req.body.customer_id) {
+            const customPriceResult = await executeQuery(
+                'SELECT customer_price FROM customer_product_prices WHERE customer_id = ? AND product_id = ?',
+                [req.body.customer_id, productId]
+            );
+            if (customPriceResult.length > 0) {
+                priceToUse = customPriceResult[0].customer_price;
+            }
         }
+        
         // --- Insert new order_product record ---
         const insertQuery = `
             INSERT INTO order_products (order_id, product_id, quantity, price, name, category, gst_rate)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         `;
-        const insertResult = await executeQuery(insertQuery, [orderId, productId, quantity, priceToUse, name, category, finalGstRate]);
+        const insertResult = await executeQuery(insertQuery, [
+            orderId, 
+            productId, 
+            quantity, 
+            priceToUse, 
+            name || '', 
+            category || '', 
+            finalGstRate || 0
+        ]);
 
         // --- Update total_amount in orders table ---
         const updateOrderTotalQuery = `

@@ -401,6 +401,50 @@ const addUser = async (userDetails) => {
       throw new Error("User already exists");
     }
 
+    // Check if phone already exists
+    if (userDetails.phone) {
+      const existingPhone = await executeQuery(
+        "SELECT * FROM users WHERE phone = ?",
+        [userDetails.phone]
+      );
+      if (existingPhone.length > 0) {
+        throw new Error("Phone number already exists");
+      }
+    }
+
+    // Check if username already exists
+    if (userDetails.username) {
+      const existingUsername = await executeQuery(
+        "SELECT * FROM users WHERE username = ?",
+        [userDetails.username]
+      );
+      if (existingUsername.length > 0) {
+        throw new Error("Username already exists");
+      }
+    }
+
+    // Check if name already exists
+    if (userDetails.name) {
+      const existingName = await executeQuery(
+        "SELECT * FROM users WHERE name = ?",
+        [userDetails.name]
+      );
+      if (existingName.length > 0) {
+        throw new Error("Name already exists");
+      }
+    }
+
+    // Check if alias already exists
+    if (userDetails.alias) {
+      const existingAlias = await executeQuery(
+        "SELECT * FROM users WHERE alias = ?",
+        [userDetails.alias]
+      );
+      if (existingAlias.length > 0) {
+        throw new Error("Alias already exists");
+      }
+    }
+
     // Hash the phone number as password with bcrypt
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(userDetails.phone, salt);
@@ -457,6 +501,31 @@ const addUser = async (userDetails) => {
     ];
 
     const result = await executeQuery(query, values);
+
+    // Assignment logic: assign user to all salesmen whose route list contains the user's route (trimming spaces)
+    if (userDetails.route) {
+      // Get all salesmen with non-empty route
+      const salesmanRows = await executeQuery(
+        "SELECT id, route FROM users WHERE route IS NOT NULL AND route != '' AND LOWER(role) = 'admin'"
+      );
+      for (const salesman of salesmanRows) {
+        const salesmanId = salesman.id;
+        const routeList = salesman.route.split(',').map(r => r.trim());
+        if (routeList.includes(userDetails.route)) {
+          // Check if already assigned
+          const exists = await executeQuery(
+            "SELECT 1 FROM admin_assign WHERE admin_id = ? AND customer_id = ? AND route = ?",
+            [salesmanId, userDetails.customer_id, userDetails.route]
+          );
+          if (exists.length === 0) {
+            await executeQuery(
+              "INSERT INTO admin_assign (admin_id, customer_id, cust_id, assigned_date, status, route) VALUES (?, ?, ?, NOW(), 'assigned', ?)",
+              [salesmanId, userDetails.customer_id, userDetails.customer_id, userDetails.route]
+            );
+          }
+        }
+      }
+    }
 
     return result.insertId;
   } catch (error) {
@@ -594,6 +663,36 @@ const getAllUsers = async (searchQuery) => {
 
 const addProduct = async (productData) => {
   try {
+    // Check for duplicate name (case-insensitive)
+    if (productData.name) {
+      const existingName = await executeQuery(
+        "SELECT * FROM products WHERE LOWER(name) = ?",
+        [productData.name.toLowerCase()]
+      );
+      if (existingName.length > 0) {
+        throw new Error("Product name already exists");
+      }
+    }
+    // Check for duplicate alias
+    if (productData.alias) {
+      const existingAlias = await executeQuery(
+        "SELECT * FROM products WHERE alias = ?",
+        [productData.alias]
+      );
+      if (existingAlias.length > 0) {
+        throw new Error("Product alias already exists");
+      }
+    }
+    // Check for duplicate part_number
+    if (productData.part_number) {
+      const existingPartNumber = await executeQuery(
+        "SELECT * FROM products WHERE part_number = ?",
+        [productData.part_number]
+      );
+      if (existingPartNumber.length > 0) {
+        throw new Error("Product part number already exists");
+      }
+    }
     const query = `
       INSERT INTO products (
         product_code,
@@ -707,6 +806,44 @@ const updateUser = async (customer_id, userDetails) => {
 
     if (existingUser.length === 0) {
       throw new Error("User not found");
+    }
+
+    // Duplicate checks for phone, username, name, alias (exclude current user)
+    if (userDetails.phone) {
+      const existingPhone = await executeQuery(
+        "SELECT * FROM users WHERE phone = ? AND customer_id != ?",
+        [userDetails.phone, customer_id]
+      );
+      if (existingPhone.length > 0) {
+        throw new Error("Phone number already exists");
+      }
+    }
+    if (userDetails.username) {
+      const existingUsername = await executeQuery(
+        "SELECT * FROM users WHERE username = ? AND customer_id != ?",
+        [userDetails.username, customer_id]
+      );
+      if (existingUsername.length > 0) {
+        throw new Error("Username already exists");
+      }
+    }
+    if (userDetails.name) {
+      const existingName = await executeQuery(
+        "SELECT * FROM users WHERE name = ? AND customer_id != ?",
+        [userDetails.name, customer_id]
+      );
+      if (existingName.length > 0) {
+        throw new Error("Name already exists");
+      }
+    }
+    if (userDetails.alias) {
+      const existingAlias = await executeQuery(
+        "SELECT * FROM users WHERE alias = ? AND customer_id != ?",
+        [userDetails.alias, customer_id]
+      );
+      if (existingAlias.length > 0) {
+        throw new Error("Alias already exists");
+      }
     }
 
     // Build update query dynamically based on provided fields
@@ -898,6 +1035,35 @@ const updateProduct = async (id, updateFields) => {
     // Validate id
     if (!id) {
       throw new Error("Product ID is required");
+    }
+
+    // Duplicate checks for name (case-insensitive), alias, part_number
+    if (updateFields.name) {
+      const existingName = await executeQuery(
+        "SELECT id FROM products WHERE LOWER(name) = ? AND id != ?",
+        [updateFields.name.toLowerCase(), id]
+      );
+      if (existingName.length > 0) {
+        throw new Error("Product name already exists");
+      }
+    }
+    if (updateFields.alias) {
+      const existingAlias = await executeQuery(
+        "SELECT id FROM products WHERE alias = ? AND id != ?",
+        [updateFields.alias, id]
+      );
+      if (existingAlias.length > 0) {
+        throw new Error("Product alias already exists");
+      }
+    }
+    if (updateFields.part_number) {
+      const existingPartNumber = await executeQuery(
+        "SELECT id FROM products WHERE part_number = ? AND id != ?",
+        [updateFields.part_number, id]
+      );
+      if (existingPartNumber.length > 0) {
+        throw new Error("Product part number already exists");
+      }
     }
 
     // If price is missing, fetch the current price from the database
